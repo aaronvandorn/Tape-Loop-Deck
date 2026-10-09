@@ -107,6 +107,20 @@ select.sel{background:var(--well);border:1px solid var(--line);border-radius:4px
 .tog[aria-pressed="true"]{color:var(--bg);background:var(--teal);border-color:var(--teal)}
 [disabled]{opacity:.45}
 
+.trim{border-top:1px dashed var(--line);padding-top:12px;display:grid;gap:10px}
+.trim-head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.trimwrap{position:relative;height:72px;background:var(--well);border:1px solid var(--line);border-radius:5px;overflow:hidden;touch-action:none;cursor:pointer}
+.trimwrap canvas{position:absolute;inset:0;width:100%;height:100%}
+.tshade{position:absolute;top:0;bottom:0;background:color-mix(in srgb,var(--bg) 72%,transparent);pointer-events:none}
+.tshade.l{left:0}
+.tshade.r{right:0}
+.tsel{position:absolute;top:0;bottom:0;border-top:2px solid var(--oxide-hi);border-bottom:2px solid var(--oxide-hi);cursor:grab}
+.tsel:active{cursor:grabbing}
+.thandle{position:absolute;top:0;bottom:0;width:16px;margin-left:-8px;cursor:ew-resize;z-index:2;outline:none}
+.thandle::before{content:"";position:absolute;left:7px;top:0;bottom:0;width:2px;background:var(--oxide-hi)}
+.thandle span{position:absolute;left:2px;width:12px;height:20px;top:50%;margin-top:-10px;background:var(--oxide-hi);border-radius:3px}
+.thandle:focus-visible span{box-shadow:0 0 0 2px var(--teal)}
+.btn[aria-expanded="true"]{border-color:var(--oxide-hi);color:var(--oxide-hi)}
 .drop{border:1.5px dashed var(--line);border-radius:6px;padding:22px 16px;text-align:center;color:var(--muted);display:grid;gap:8px;place-items:center}
 .drop.over{border-color:var(--oxide-hi);background:color-mix(in srgb,var(--oxide) 12%,transparent);color:var(--ink)}
 .drop strong{font-family:var(--display);font-size:20px;letter-spacing:.05em;color:var(--ink)}
@@ -491,6 +505,7 @@ function rebuild(t) {
   const playing = S.playing && t.voice;
   const ph = playing ? phaseNow(t) : 0;
   const oldLen = t.loopBuf ? t.loopBuf.duration : 0, oldRev = t.builtRev;
+  if (t._clipDirty) { t.clip = makeClip(t); t._clipDirty = false; if (t.offset >= t.tapeLen) t.offset = 0; }
   t.loopBuf = buildLoopBuffer(t); t.builtRev = t.reverse;
   if (playing) { let p = ph; if (oldRev !== t.reverse) p = oldLen - ph; startVoice(t, mod(p, t.loopBuf.duration)); }
   if (t.ui) { drawStripStatic(t); updateCardFields(t); }
@@ -554,6 +569,29 @@ function setStripChannel(t, ch) {
   else { ids.forEach(id => { if (S.midiMap[id]) S.midiMap[id].ch = ch; }); dedupeMap(ids); }
   refreshMap(); refreshBadges(); refreshStripChannels();
 }
+/* Trimming: t.src is the whole decoded file; t.clip is the trimmed part that goes on the tape. */
+const MIN_TRIM = 0.02;
+const isTrimmed = t => t.trimIn > 0.0005 || t.trimOut < t.src.duration - 0.0005;
+function makeClip(t) {
+  const src = t.src, sr = src.sampleRate;
+  const a = clamp(Math.round(t.trimIn * sr), 0, src.length - 1), end = clamp(Math.round(t.trimOut * sr), a + 1, src.length);
+  if (a === 0 && end === src.length) return src;
+  const n = end - a, out = new AudioBuffer({ numberOfChannels: src.numberOfChannels, length: n, sampleRate: sr });
+  const fade = Math.min(Math.round(sr * 0.004), n >> 2);
+  for (let c = 0; c < src.numberOfChannels; c++) {
+    const d = out.getChannelData(c); d.set(src.getChannelData(c).subarray(a, end));
+    if (a > 0) for (let i = 0; i < fade; i++) d[i] *= i / fade;
+    if (end < src.length) for (let i = 0; i < fade; i++) d[n - 1 - i] *= i / fade;
+  }
+  return out;
+}
+function setTrim(t, which, v) {
+  if (!isFinite(v)) return;
+  const D = t.src.duration;
+  if (which === 'in') t.trimIn = clamp(v, 0, Math.max(0, t.trimOut - MIN_TRIM));
+  else t.trimOut = clamp(v, Math.min(D, t.trimIn + MIN_TRIM), D);
+  t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t);
+}
 function createTape(o) {
   const t = {
     id: S.nextId++, name: o.name || 'Tape', clip: o.clip, srcBytes: o.srcBytes || null, srcType: o.srcType || '', srcName: o.srcName || '',
@@ -561,6 +599,11 @@ function createTape(o) {
     speed: o.speed || 1, reverse: !!o.reverse, note: o.note != null ? o.note : 60 + (S.tapes.length * 2) % 24,
     midiCh: 0, p: Object.assign(defaultP(), o.p || {}), demo: !!o.demo, voice: null, ch: null, anchorCtx: 0, anchorPhase: 0, reelA: [0, 0]
   };
+  t.src = o.clip;
+  t.trimIn = clamp(o.trimIn || 0, 0, o.clip.duration);
+  t.trimOut = o.trimOut != null ? clamp(o.trimOut, Math.min(o.clip.duration, t.trimIn + MIN_TRIM), o.clip.duration) : o.clip.duration;
+  t.clip = makeClip(t);
+  if (!o.tapeLen) t.tapeLen = Math.max(1, Math.round(t.clip.duration * 2 * 10) / 10);
   registerTapeCtls(t);
   if (o.midiCh != null) t.midiCh = o.midiCh; else { t.midiCh = nextFreeChannel(); if (t.midiCh) autoMap(t, t.midiCh); }
   S.tapes.push(t);
@@ -572,7 +615,7 @@ function createTape(o) {
   return t;
 }
 function removeTape(t) {
-  stopVoice(t); detachChannel(t);
+  stopAudition(t); stopVoice(t); detachChannel(t);
   for (const k of Object.keys(CH)) { CTL.delete(`t${t.id}:${k}`); delete S.midiMap[`t${t.id}:${k}`]; }
   S.tapes = S.tapes.filter(x => x !== t);
   if (t.ui) t.ui.card.remove();
@@ -582,7 +625,7 @@ function removeTape(t) {
 }
 function renumber() { S.tapes.forEach((t, i) => { if (t.ui) t.ui.no.textContent = String(i + 1).padStart(2, '0'); }); }
 function duplicateTape(t) {
-  createTape({ name: t.name + ' copy', clip: t.clip, srcBytes: t.srcBytes, srcType: t.srcType, srcName: t.srcName, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, p: Object.assign({}, t.p, { solo: false }) });
+  createTape({ name: t.name + ' copy', clip: t.src, trimIn: t.trimIn, trimOut: t.trimOut, srcBytes: t.srcBytes, srcType: t.srcType, srcName: t.srcName, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, p: Object.assign({}, t.p, { solo: false }) });
   renumber();
 }
 async function decodeBytes(bytes) { return await DEC.decodeAudioData(bytes.slice(0)); }
@@ -599,9 +642,10 @@ async function addFiles(files) {
 async function replaceAudio(t, f) {
   try {
     const bytes = await f.arrayBuffer(); const buf = await decodeBytes(bytes);
-    t.clip = buf; t.srcBytes = bytes; t.srcType = f.type; t.srcName = f.name;
+    t.src = buf; t.trimIn = 0; t.trimOut = buf.duration; t.clip = buf; t._clipDirty = false;
+    t.srcBytes = bytes; t.srcType = f.type; t.srcName = f.name;
     if (t.offset >= t.tapeLen) t.offset = 0;
-    rebuild(t); toast(`Loaded ${f.name} onto ${t.name}.`);
+    rebuild(t); drawTrimWave(t); updateTrimUI(t); toast(`Loaded ${f.name} onto ${t.name}.`);
   } catch (e) { toast(`Couldn't read ${f.name}. Try WAV, MP3, OGG or FLAC.`); }
 }
 
@@ -643,10 +687,11 @@ function buildCard(t) {
   ui.notePot = potEl({ name: 'MIDI note for export', label: 'MIDI note', get: () => t.note, set: v => { t.note = clamp(Math.round(v), 0, 127); ui.notePot.render(); },
     norm: v => v / 127, denorm: n => n * 127, dflt: 60, step: 1, disp: v => dispFor('note', v), parse: x => parseFor('note', x) }, 'row');
 
+  buildTrim(t);
   ui.card = h('article', { class: 'tape' },
     h('div', { class: 'tape-head' }, ui.no, ui.name, ui.meta,
       h('div', { class: 'tape-acts' },
-        h('button', { class: 'btn small', onclick: () => fileIn.click() }, 'Replace sound'),
+        ui.trimBtn, h('button', { class: 'btn small', onclick: () => fileIn.click() }, 'Replace sound'),
         h('button', { class: 'btn small', onclick: () => duplicateTape(t) }, 'Duplicate'), rmBtn, fileIn)),
     h('div', { class: 'deckrow' }, ui.reels, h('div', { class: 'stripbox' }, ui.stripwrap, ui.info)),
     h('div', { class: 'ctrls' },
@@ -654,20 +699,132 @@ function buildCard(t) {
       ui.lenPot.el, ui.offPot.el, ctlPot(spId, 'row', 'Tape speed'),
       h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Direction'), ui.rev),
       ui.notePot.el
-    )
+    ),
+    ui.trimPanel
   );
   $('#tapes').append(ui.card);
   setupStripDrag(t);
   new ResizeObserver(() => { sizeCanvas(ui.reels); drawStripStatic(t); }).observe(ui.stripwrap);
+  new ResizeObserver(() => { if (!ui.trimPanel.hidden) drawTrimWave(t); }).observe(ui.trimWrap);
   sizeCanvas(ui.reels);
   drawStripStatic(t); updateCardFields(t); renumber();
+}
+function buildTrim(t) {
+  const ui = t.ui;
+  ui.trimBtn = h('button', { class: 'btn small', 'aria-expanded': 'false' }, 'Trim');
+  ui.trimCv = h('canvas');
+  ui.tShadeL = h('div', { class: 'tshade l' }); ui.tShadeR = h('div', { class: 'tshade r' });
+  ui.tSel = h('div', { class: 'tsel', title: 'Drag to slide the selection' });
+  ui.hIn = h('div', { class: 'thandle in', tabindex: 0, role: 'slider', 'aria-label': 'Trim start' }, h('span'));
+  ui.hOut = h('div', { class: 'thandle out', tabindex: 0, role: 'slider', 'aria-label': 'Trim end' }, h('span'));
+  ui.trimHead = h('div', { class: 'playhead', hidden: true });
+  ui.trimWrap = h('div', { class: 'trimwrap' }, ui.trimCv, ui.tShadeL, ui.tShadeR, ui.tSel, ui.hIn, ui.hOut, ui.trimHead);
+  ui.inPot = potEl({ name: 'Trim start', label: 'Start', get: () => t.trimIn, set: v => setTrim(t, 'in', v),
+    norm: v => v / t.src.duration, denorm: n => n * t.src.duration, dflt: 0, disp: v => dispFor('s3', v), parse: x => parseFor('s', x) }, 'row');
+  ui.outPot = potEl({ name: 'Trim end', label: 'End', get: () => t.trimOut, set: v => setTrim(t, 'out', v),
+    norm: v => v / t.src.duration, denorm: n => n * t.src.duration, get dflt() { return t.src.duration; }, disp: v => dispFor('s3', v), parse: x => parseFor('s', x) }, 'row');
+  ui.trimLen = h('span', { class: 'readout' });
+  ui.audBtn = h('button', { class: 'btn small' }, 'Audition');
+  const resetBtn = h('button', { class: 'btn small', onclick: () => { t.trimIn = 0; t.trimOut = t.src.duration; t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t); } }, 'Reset to whole file');
+  ui.trimPanel = h('div', { class: 'trim', hidden: true },
+    h('div', { class: 'trim-head' }, h('span', { class: 'lbl' }, 'Trim the source sound'),
+      h('span', { class: 'tape-meta' }, 'Drag the handles to set where the clip starts and stops, or drag the selection to slide it. The full file is kept, so you can widen it again later.')),
+    ui.trimWrap,
+    h('div', { class: 'ctrls' }, ui.inPot.el, ui.outPot.el, h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Clip length'), ui.trimLen), ui.audBtn, resetBtn));
+  ui.trimBtn.addEventListener('click', () => {
+    const open = ui.trimPanel.hidden;
+    ui.trimPanel.hidden = !open; ui.trimBtn.setAttribute('aria-expanded', String(open));
+    if (open) { drawTrimWave(t); updateTrimUI(t); } else stopAudition(t);
+  });
+  ui.audBtn.addEventListener('click', () => auditionTrim(t));
+  // pointer: handles, slide the selection, or click outside to move the nearest edge
+  ui.trimWrap.addEventListener('pointerdown', e => {
+    if (S.learn || e.button > 0) return;
+    const r = ui.trimWrap.getBoundingClientRect(), D = t.src.duration;
+    const toT = x => clamp((x - r.left) / r.width, 0, 1) * D;
+    const x0 = toT(e.clientX);
+    let mode;
+    if (e.target.closest('.thandle.in')) mode = 'in';
+    else if (e.target.closest('.thandle.out')) mode = 'out';
+    else if (x0 > t.trimIn && x0 < t.trimOut) mode = 'move';
+    else mode = Math.abs(x0 - t.trimIn) < Math.abs(x0 - t.trimOut) ? 'in' : 'out';
+    e.preventDefault(); ui.trimWrap.setPointerCapture(e.pointerId);
+    if (mode === 'in') ui.hIn.focus(); else if (mode === 'out') ui.hOut.focus();
+    const a0 = t.trimIn, len = t.trimOut - t.trimIn;
+    const move = ev => {
+      const x = toT(ev.clientX);
+      if (mode === 'in') setTrim(t, 'in', x);
+      else if (mode === 'out') setTrim(t, 'out', x);
+      else { const na = clamp(a0 + (x - x0), 0, D - len); t.trimIn = na; t.trimOut = na + len; t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t); }
+    };
+    if (mode !== 'move') move(e);
+    ui.trimWrap.onpointermove = move;
+    ui.trimWrap.onpointerup = ui.trimWrap.onpointercancel = () => { ui.trimWrap.onpointermove = null; };
+  });
+  for (const [el, which] of [[ui.hIn, 'in'], [ui.hOut, 'out']]) {
+    el.addEventListener('keydown', e => {
+      const d = (e.shiftKey ? 0.1 : 0.01) * (e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : 0);
+      if (!d) return; e.preventDefault();
+      setTrim(t, which, (which === 'in' ? t.trimIn : t.trimOut) + d);
+    });
+  }
+}
+function updateTrimUI(t) {
+  const ui = t.ui; if (!ui || !ui.trimWrap) return;
+  const D = t.src.duration, pi = t.trimIn / D * 100, po = t.trimOut / D * 100;
+  ui.tShadeL.style.width = pi + '%';
+  ui.tShadeR.style.width = (100 - po) + '%';
+  ui.tSel.style.left = pi + '%'; ui.tSel.style.width = (po - pi) + '%';
+  ui.hIn.style.left = pi + '%'; ui.hOut.style.left = po + '%';
+  ui.hIn.setAttribute('aria-valuenow', t.trimIn.toFixed(3)); ui.hIn.setAttribute('aria-valuetext', t.trimIn.toFixed(3) + ' seconds');
+  ui.hOut.setAttribute('aria-valuenow', t.trimOut.toFixed(3)); ui.hOut.setAttribute('aria-valuetext', t.trimOut.toFixed(3) + ' seconds');
+  ui.inPot.render(); ui.outPot.render();
+  ui.trimLen.textContent = `${(t.trimOut - t.trimIn).toFixed(3)} s of ${D.toFixed(2)} s`;
+  ui.trimBtn.textContent = isTrimmed(t) ? 'Trim ✓' : 'Trim';
+}
+function drawTrimWave(t) {
+  const cv = t.ui.trimCv; sizeCanvas(cv);
+  const W = cv.width, H = cv.height; if (!W) return;
+  const c = cv.getContext('2d'), dpr = window.devicePixelRatio || 1, src = t.src, D = src.duration;
+  c.clearRect(0, 0, W, H);
+  const step = D > 120 ? 10 : D > 30 ? 5 : D > 8 ? 1 : D > 2 ? 0.5 : 0.1;
+  c.font = `${9 * dpr}px monospace`;
+  for (let s = 0, i = 0; s <= D; s = ++i * step) {
+    const x = Math.round(s / D * W) + 0.5;
+    c.fillStyle = COL['grid-faint']; c.fillRect(x, 0, dpr, H);
+    if (i % 2 === 0 && s < D - step) { c.fillStyle = COL.muted; c.fillText((step < 1 ? s.toFixed(1) : s.toFixed(0)) + 's', x + 3 * dpr, H - 4 * dpr); }
+  }
+  const d0 = src.getChannelData(0), d1 = src.getChannelData(src.numberOfChannels > 1 ? 1 : 0), n = d0.length, per = n / W;
+  const mid = H / 2 - 5 * dpr, amp = H / 2 - 12 * dpr;
+  c.fillStyle = COL.ink; c.globalAlpha = 0.85;
+  for (let x = 0; x < W; x++) {
+    let mn = 0, mx = 0; const a = Math.floor(x * per), b = Math.min(n, Math.floor((x + 1) * per));
+    const stride = Math.max(1, Math.floor((b - a) / 64));
+    for (let i = a; i < b; i += stride) { const v = (d0[i] + d1[i]) * 0.5; if (v < mn) mn = v; if (v > mx) mx = v; }
+    c.fillRect(x, mid - mx * amp, 1, Math.max(1, (mx - mn) * amp));
+  }
+  c.globalAlpha = 1;
+}
+function stopAudition(t) {
+  if (t.aud) { try { t.aud.src.stop(); } catch (e) {} t.aud = null; }
+  if (t.ui) { t.ui.audBtn.textContent = 'Audition'; t.ui.trimHead.hidden = true; }
+}
+async function auditionTrim(t) {
+  if (t.aud) { stopAudition(t); return; }
+  ensureAudio(); try { await AC.resume(); } catch (e) {}
+  if (t._clipDirty) { t.clip = makeClip(t); t._clipDirty = false; }
+  const src = AC.createBufferSource(); src.buffer = t.clip; src.connect(MASTER.gain); src.start();
+  t.aud = { src, start: AC.currentTime, from: t.trimIn, dur: t.clip.duration };
+  t.ui.audBtn.textContent = 'Stop'; t.ui.trimHead.hidden = false;
+  src.onended = () => { if (t.aud && t.aud.src === src) stopAudition(t); };
 }
 function updateCardFields(t) {
   const ui = t.ui; if (!ui) return;
   const pad = t.mode === 'pad', D = t.clip.duration, L = loopLen(t);
   ui.bLoop.setAttribute('aria-pressed', String(!pad)); ui.bPad.setAttribute('aria-pressed', String(pad));
   ui.rev.setAttribute('aria-pressed', String(t.reverse));
-  ui.meta.textContent = `Clip ${fmtS(D)} · ${t.clip.numberOfChannels === 1 ? 'mono' : 'stereo'}`;
+  ui.meta.textContent = `Clip ${fmtS(D)}${isTrimmed(t) ? ` (trimmed from ${fmtS(t.src.duration)})` : ''} · ${t.clip.numberOfChannels === 1 ? 'mono' : 'stereo'}`;
+  updateTrimUI(t);
   ui.lenPot.setDisabled(!pad); ui.offPot.setDisabled(!pad);
   ui.lenPot.el.title = pad ? '' : 'In Loop clip mode the tape is exactly as long as the sound.';
   ui.lenPot.render(); ui.offPot.render(); ui.notePot.render();
@@ -787,6 +944,7 @@ function dispFor(k, v) {
     case 'x': return [v.toFixed(2), '×'];
     case 'pan': { const p = Math.round(v * 100); return [String(Math.abs(p)), p < 0 ? 'L' : p > 0 ? 'R' : 'C']; }
     case 's': return [v.toFixed(2), 's'];
+    case 's3': return [v.toFixed(3), 's'];
     case 'note': return [String(Math.round(v)), noteName(Math.round(v))];
   }
   return [String(v), ''];
@@ -1225,8 +1383,8 @@ async function saveProject() {
   }
   const proj = {
     app: 'tape-loop-deck', version: 1, name: $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
-    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p,
-      audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.clip)) } }))
+    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut,
+      audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } }))
   };
   await offerFile(fileBase() + '.json', new Blob([JSON.stringify(proj)], { type: 'application/json' }));
 }
@@ -1245,7 +1403,7 @@ async function loadProject(file) {
     try {
       const bytes = b64ToAb(pt.audio.data), clip = await decodeBytes(bytes);
       made.push(createTape({ name: pt.name, clip, srcBytes: bytes, srcType: pt.audio.type, srcName: pt.audio.name,
-        mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, quiet: true }));
+        mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, trimIn: pt.trimIn, trimOut: pt.trimOut, quiet: true }));
     } catch (e) { made.push(null); toast(`Couldn't decode the audio for ${pt.name}.`); }
   }
   for (const [k, m] of Object.entries(proj.midiMap || {})) {
@@ -1330,6 +1488,7 @@ function frame(now) {
       if (!t.ui) continue;
       drawReels(t, dt);
       t.ui.head.style.left = (phaseNow(t) / t.loopBuf.duration * 100) + '%';
+      if (t.aud && AC) t.ui.trimHead.style.left = (Math.min(t.aud.from + AC.currentTime - t.aud.start, t.src.duration) / t.src.duration * 100) + '%';
     }
   } else {
     for (const t of S.tapes) if (t.ui && t.ui.meter) updateMeter(t.ui.meter, S.playing && t.ch ? t.ch.an : null);
@@ -1384,7 +1543,7 @@ function onThemeChange() {
   const light = effectiveTheme() === 'light', b = $('#themeBtn');
   b.textContent = light ? '☾ Dark' : '☀ Light';
   b.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
-  S.tapes.forEach(t => t.ui && drawStripStatic(t));
+  S.tapes.forEach(t => { if (t.ui) { drawStripStatic(t); if (!t.ui.trimPanel.hidden) drawTrimWave(t); } });
 }
 $('#themeBtn').addEventListener('click', () => {
   const next = effectiveTheme() === 'light' ? 'dark' : 'light';
@@ -1481,7 +1640,7 @@ function guestCapture() {
   return {
     app: 'tape-loop-deck', version: 1, audioIncluded: false,
     name: $('#projName').value, snap: S.snap, master: { vol: S.master.vol },
-    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: Object.assign({}, t.p) }))
+    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, trimIn: t.trimIn, trimOut: t.trimOut, p: Object.assign({}, t.p) }))
   };
 }
 function guestApply(st) {
@@ -1503,6 +1662,11 @@ function guestApply(st) {
     const of = num(pt.offset, 0, 600); if (of !== null) t.offset = of < t.tapeLen ? of : 0;
     if (typeof pt.reverse === 'boolean') t.reverse = pt.reverse;
     const nt = num(pt.note, 0, 127); if (nt !== null) t.note = Math.round(nt);
+    const tiIn = num(pt.trimIn, 0, t.src.duration), tiOut = num(pt.trimOut, 0, t.src.duration);
+    if (tiIn !== null || tiOut !== null) {
+      const a = tiIn ?? 0, b = tiOut ?? t.src.duration;
+      if (b - a >= MIN_TRIM) { t.trimIn = a; t.trimOut = b; t._clipDirty = true; updateTrimUI(t); }
+    }
     if (pt.p && typeof pt.p === 'object') for (const [k, spec] of Object.entries(CH)) {
       if (k === 'speed' || !(k in pt.p)) continue;
       if (spec.toggle) { if (typeof pt.p[k] === 'boolean') t.p[k] = pt.p[k]; }
