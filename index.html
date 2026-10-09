@@ -385,10 +385,11 @@ function ensureAudio() {
   if (AC) return;
   AC = new (window.AudioContext || window.webkitAudioContext)();
   const g = AC.createGain(), an = AC.createAnalyser(); an.fftSize = 1024;
-  g.connect(an); an.connect(AC.destination); MASTER = { gain: g, an };
+  g.connect(an); an.connect(guestSpeakers(AC)); MASTER = { gain: g, an };
   IMPULSE = makeImpulse(AC.sampleRate);
   applyMaster();
   S.tapes.forEach(attachChannel);
+  guestSyncAudio();
 }
 function buildChannel(ctx, dest, impulse) {
   const n = {};
@@ -461,11 +462,12 @@ function buildLoopBuffer(t) {
 }
 function phaseNow(t) {
   if (!S.playing || !t.voice || !AC) return 0;
-  return mod(t.anchorPhase + (AC.currentTime - t.anchorCtx) * t.speed, t.loopBuf.duration);
+  return mod(t.anchorPhase + Math.max(0, AC.currentTime - t.anchorCtx) * t.speed, t.loopBuf.duration);
 }
-function startVoice(t, phase) {
+// `when` (AudioContext time) lets a Discobot start place every tape on the host's beat.
+function startVoice(t, phase, when) {
   if (!AC || !t.ch) return;
-  const now = AC.currentTime;
+  const now = Math.max(AC.currentTime, when || 0);
   stopVoice(t);
   const src = AC.createBufferSource(); src.buffer = t.loopBuf; src.loop = true; src.playbackRate.value = t.speed;
   const g = AC.createGain(); g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(1, now + 0.012);
@@ -495,16 +497,25 @@ function rebuild(t) {
 }
 function scheduleRebuild(t) { if (t._rb) return; t._rb = requestAnimationFrame(() => { t._rb = 0; rebuild(t); }); }
 
-async function play() {
+// startWall: only from Discobot, the shared-clock time (ms) the tapes start from.
+async function play(startWall) {
+  const hosted = startWall != null;
   ensureAudio();
   try { await AC.resume(); } catch (e) {}
-  if (!S.tapes.length) { toast('Add a sound first.'); syncCtl('m:play'); return; }
-  S.playing = true; S.t0 = AC.currentTime;
-  S.tapes.forEach(t => startVoice(t, 0));
+  if (hosted && !guestWantsPlay()) return;            // Discobot stopped while the audio was starting
+  if (!S.tapes.length && !hosted) { toast('Add a sound first.'); syncCtl('m:play'); return; }
+  let at = AC.currentTime, late = 0;
+  if (hosted) {
+    at = guestCtxAtWall(startWall);
+    const soonest = AC.currentTime + 0.02;
+    if (at < soonest) { late = soonest - at; at = soonest; }  // joining late: pick up the tapes where they would be
+  }
+  S.playing = true; S.t0 = at - late;
+  S.tapes.forEach(t => startVoice(t, late * t.speed, at));
   syncCtl('m:play');
 }
 function stop() { S.playing = false; S.tapes.forEach(stopVoice); syncCtl('m:play'); }
-function togglePlay() { S.playing ? stop() : play(); }
+function togglePlay() { if (guestHosted()) return; S.playing ? stop() : play(); } // in a Discobot rack, Discobot starts and stops
 
 /* ================= tapes ================= */
 function nextFreeChannel() {
@@ -1082,7 +1093,7 @@ function refreshMap() {
 
 /* ================= master controls ================= */
 defCtl('m:vol', { label: 'Master volume', short: 'Master', d: 'vol', min: -60, max: 6, dflt: 0, scale: 'fader', fmt: CH.vol.fmt, get: () => S.master.vol, set: v => { S.master.vol = v; applyMaster(); } });
-defCtl('m:play', { label: 'Play / stop', toggle: true, get: () => S.playing, set: v => { if (v && !S.playing) play(); else if (!v && S.playing) stop(); } });
+defCtl('m:play', { label: 'Play / stop', toggle: true, get: () => S.playing, set: v => { if (guestHosted()) { syncCtl('m:play'); return; } if (v && !S.playing) play(); else if (!v && S.playing) stop(); } });
 S.midiMap['m:vol'] = { ch: 16, type: 'cc', num: 7 };
 S.midiMap['m:play'] = { ch: 16, type: 'cc', num: 20 };
 bindEl('m:play', $('#play'), () => {
@@ -1385,12 +1396,203 @@ new MutationObserver(onThemeChange).observe(document.documentElement, { attribut
 lightQuery.addEventListener('change', onThemeChange);
 onThemeChange();
 
+/* ================= Discobot guest =================
+   When Discobot (https://iw978599.github.io/discobot/) shows this page in a frame, the deck is a
+   unit in its rack: Discobot starts and stops the tapes on its beat, takes the mix into its mixer,
+   and keeps the deck's settings with its project. Tapes run at their own speeds, so Discobot's tempo
+   changes leave them alone. Settings travel without the audio (Discobot keeps at most 100,000
+   characters per guest), and are put back onto loaded tapes with the same names.
+   Nothing here is active unless the page is framed and Discobot has said hello.
+   Protocol: https://github.com/iw978599/discobot/blob/main/docs/GUEST_PROTOCOL.md */
+var GUEST_FRAMED = (() => { try { return window.parent !== window; } catch (e) { return true; } })();
+var G = { on: false, origin: null, latencyMs: 0, audio: false, playing: false, startWall: 0, booted: false, pending: null,
+          monitor: null, tap: null, tapCtx: null, ready: null, changeTimer: 0, badge: null, unlock: null };
+const GUEST_TAP_SRC = 'registerProcessor("tld-guest-tap", class extends AudioWorkletProcessor {' +
+  'constructor(){ super(); this.l = new Float32Array(1024); this.r = new Float32Array(1024); this.n = 0; this.start = 0; }' +
+  'process(inputs){ var input = inputs[0], a = input && input[0], b = input && (input[1] || input[0]);' +
+  ' if(this.n === 0) this.start = currentFrame;' +
+  ' for(var i = 0; i < 128; i++){ var x = a ? a[i] : 0, y = b ? b[i] : 0; this.l[this.n + i] = x > 1 ? 1 : x < -1 ? -1 : x; this.r[this.n + i] = y > 1 ? 1 : y < -1 ? -1 : y; }' +
+  ' this.n += 128;' +
+  ' if(this.n >= 1024){ this.port.postMessage({ frame: this.start, l: this.l, r: this.r }, [this.l.buffer, this.r.buffer]);' +
+  '  this.l = new Float32Array(1024); this.r = new Float32Array(1024); this.n = 0; }' +
+  ' return true; } });';
+
+function guestHosted() { return !!(G && G.on); }
+function guestWantsPlay() { return G.on && G.playing; }
+const wallNow = () => performance.timeOrigin + performance.now();
+function guestCtxAtWall(wall) {
+  const s = AC.getOutputTimestamp ? AC.getOutputTimestamp() : null;
+  if (s && s.performanceTime && s.contextTime) return s.contextTime + (wall - (performance.timeOrigin + s.performanceTime)) / 1000;
+  return AC.currentTime + (wall - wallNow()) / 1000;
+}
+function guestWallAtCtx(time) {
+  const s = AC.getOutputTimestamp ? AC.getOutputTimestamp() : null;
+  if (s && s.performanceTime && s.contextTime) return performance.timeOrigin + s.performanceTime + (time - s.contextTime) * 1000;
+  return wallNow() + (time - AC.currentTime) * 1000;
+}
+// While Discobot carries the sound it holds it back by latencyMs, so the deck starts that much early.
+function guestEarlyMs() { return G.on && G.audio ? G.latencyMs : 0; }
+
+function guestSend(msg, transfer) {
+  if (!GUEST_FRAMED) return;
+  msg.discobotGuest = 1;
+  try { window.parent.postMessage(msg, G.origin && G.origin !== 'null' ? G.origin : '*', transfer || []); } catch (e) {}
+}
+
+// The mix reaches the speakers through this gain, which is 0 while Discobot carries the sound.
+function guestSpeakers(ctx) {
+  if (!G.monitor || G.monitor.context !== ctx) {
+    G.monitor = ctx.createGain();
+    G.monitor.gain.value = G.on && G.audio ? 0 : 1;
+    G.monitor.connect(ctx.destination);
+  }
+  return G.monitor;
+}
+function guestSyncAudio() {
+  const want = G.on && G.audio;
+  if (G.monitor) G.monitor.gain.value = want ? 0 : 1;
+  if (!want) { guestStopTap(); return; }
+  if (!AC || !MASTER || !AC.audioWorklet || typeof AudioWorkletNode === 'undefined' || G.tapCtx === AC) return;
+  const ctx = AC;
+  G.tapCtx = ctx;
+  if (!G.ready || G.ready.ctx !== ctx) G.ready = { ctx, promise: ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([GUEST_TAP_SRC], { type: 'application/javascript' }))) };
+  G.ready.promise.then(() => {
+    if (!(G.on && G.audio) || G.tapCtx !== ctx || G.tap) return;
+    const node = new AudioWorkletNode(ctx, 'tld-guest-tap', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+    node.port.onmessage = ev => {
+      if (G.tap !== node) return;
+      const d = ev.data;
+      // when this block's first sample would have been heard on this page
+      guestSend({ type: 'audio', wall: guestWallAtCtx(d.frame / ctx.sampleRate), sampleRate: ctx.sampleRate, left: d.l, right: d.r }, [d.l.buffer, d.r.buffer]);
+    };
+    MASTER.an.connect(node);           // the mix, after the master fader
+    node.connect(ctx.destination);     // outputs silence; this only keeps the tap running
+    G.tap = node;
+  }).catch(err => { if (G.tapCtx === ctx) G.tapCtx = null; G.ready = null; console.warn('Could not start sending sound to Discobot', err); });
+}
+function guestStopTap() {
+  if (G.tap) { try { MASTER.an.disconnect(G.tap); } catch (e) {} try { G.tap.port.onmessage = null; G.tap.disconnect(); } catch (e) {} }
+  G.tap = null; G.tapCtx = null;
+}
+
+/* settings: everything but the audio */
+function guestCapture() {
+  if (!G.booted && G.pending) return G.pending;   // not set up yet: hand back what Discobot gave us
+  return {
+    app: 'tape-loop-deck', version: 1, audioIncluded: false,
+    name: $('#projName').value, snap: S.snap, master: { vol: S.master.vol },
+    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: Object.assign({}, t.p) }))
+  };
+}
+function guestApply(st) {
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return;
+  if (!G.booted) { G.pending = st; return; }
+  const num = (v, lo, hi) => typeof v === 'number' && isFinite(v) ? clamp(v, lo, hi) : null;
+  if (typeof st.name === 'string') $('#projName').value = st.name.slice(0, 80);
+  const snap = num(st.snap, 0, 1); if (snap !== null) { S.snap = snap; $('#snapSel').value = String(snap); }
+  const mv = st.master && num(st.master.vol, -60, 6); if (mv !== null && mv !== undefined) { S.master.vol = mv; applyMaster(); syncCtl('m:vol'); }
+  const used = new Set();
+  let applied = 0, missing = 0;
+  (Array.isArray(st.tapes) ? st.tapes : []).forEach(pt => {
+    if (!pt || typeof pt !== 'object') return;
+    const t = S.tapes.find(x => !used.has(x) && x.name === pt.name);
+    if (!t) { missing++; return; }
+    used.add(t); applied++;
+    if (pt.mode === 'loop' || pt.mode === 'pad') t.mode = pt.mode;
+    const tl = num(pt.tapeLen, 0.1, 600); if (tl !== null) t.tapeLen = tl;
+    const of = num(pt.offset, 0, 600); if (of !== null) t.offset = of < t.tapeLen ? of : 0;
+    if (typeof pt.reverse === 'boolean') t.reverse = pt.reverse;
+    const nt = num(pt.note, 0, 127); if (nt !== null) t.note = Math.round(nt);
+    if (pt.p && typeof pt.p === 'object') for (const [k, spec] of Object.entries(CH)) {
+      if (k === 'speed' || !(k in pt.p)) continue;
+      if (spec.toggle) { if (typeof pt.p[k] === 'boolean') t.p[k] = pt.p[k]; }
+      else { const v = num(pt.p[k], spec.min, spec.max); if (v !== null) t.p[k] = v; }
+    }
+    const sp = num(pt.speed, CH.speed.min, CH.speed.max); if (sp !== null) setSpeed(t, sp);
+    rebuild(t);
+    for (const k of Object.keys(CH)) syncCtl(`t${t.id}:${k}`);
+  });
+  applyAll();
+  if (missing) toast(`Discobot restored settings for ${applied} tape${applied === 1 ? '' : 's'}. Add the audio for the other ${missing}; Discobot keeps settings, not sound.`);
+}
+
+function guestTransport(m) {
+  if (m.playing === false) { G.playing = false; if (S.playing) stop(); guestShow(); return; }
+  if (m.playing !== true) return;
+  const bpm = Number(m.bpm), aw = Number(m.anchorWall), ab = Number(m.anchorBeat);
+  if (!isFinite(bpm) || bpm <= 0 || !isFinite(aw) || !isFinite(ab) || ab < 0) return;
+  if (G.playing) return;   // a tempo change: the tapes keep their own speeds
+  G.playing = true;
+  // Beat anchorBeat falls at anchorWall; the tapes start from there.
+  G.startWall = aw;
+  if (S.playing) stop();
+  play(G.startWall - guestEarlyMs());
+  guestShow();
+}
+
+function guestShow() {
+  if (!G.on) return;
+  if (!G.badge) {
+    G.badge = h('span', { class: 'lbl', title: 'Discobot starts and stops the tapes and plays their sound' }, 'In Discobot');
+    $('#play').after(G.badge);
+  }
+  $('#play').style.display = 'none';
+  const need = !!(G.playing && AC && AC.state !== 'running');
+  if (need && !G.unlock) {
+    G.unlock = h('button', { class: 'btn primary', style: 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:60', onclick: () => {
+      ensureAudio();
+      AC.resume().then(() => { if (G.playing && !S.playing) play(G.startWall - guestEarlyMs()); guestShow(); });
+    } }, 'Click here to enable sound');
+    document.body.append(G.unlock);
+  }
+  if (G.unlock) G.unlock.hidden = !need;
+}
+
+function guestBooted() {
+  G.booted = true;
+  if (G.pending) { const st = G.pending; G.pending = null; guestApply(st); }
+}
+
+if (GUEST_FRAMED) {
+  window.addEventListener('message', e => {
+    if (e.source !== window.parent) return;
+    const m = e.data;
+    if (!m || typeof m !== 'object' || m.discobotGuest !== 1 || typeof m.type !== 'string') return;
+    if (G.origin === null) { if (m.type !== 'hello' || m.host !== 'discobot') return; G.origin = e.origin; }
+    else if (e.origin !== G.origin) return;
+    switch (m.type) {
+      case 'hello': {
+        if (m.host !== 'discobot') return;
+        const lat = Number(m.latencyMs);
+        G.latencyMs = isFinite(lat) ? clamp(lat, 0, 1000) : 0;
+        if (!G.on) { G.on = true; if (S.playing) stop(); guestSyncAudio(); }
+        break;
+      }
+      case 'transport': guestTransport(m); break;
+      case 'getState': if (typeof m.id === 'string' && m.id.length <= 256) guestSend({ type: 'state', id: m.id, state: guestCapture() }); break;
+      case 'setState': guestApply(m.state); break;
+      case 'audio': if (typeof m.on === 'boolean') { G.audio = m.on; guestSyncAudio(); } break;
+      default: return;
+    }
+    guestShow();
+  });
+  // Tell Discobot soon after the user changes something, at most about once a second.
+  const noteChange = e => {
+    if (!G.on || !e.isTrusted || G.changeTimer) return;
+    G.changeTimer = setTimeout(() => { G.changeTimer = 0; if (G.on) guestSend({ type: 'stateChanged' }); }, 1000);
+  };
+  ['input', 'change', 'click', 'pointerup'].forEach(t => document.addEventListener(t, noteChange, true));
+  setInterval(guestShow, 1000);
+  guestSend({ type: 'ready', name: 'Tape Loop Deck', features: ['transport', 'state', 'audio'] });
+}
+
 /* ================= boot ================= */
 (async function boot() {
   refreshMixer(); refreshMap();
   try { const saved = localStorage.getItem('tld-tab'); if (saved === 'mixer') showTab('mixer'); } catch (e) {}
   requestAnimationFrame(frame);
   try { await loadDemo(); } catch (e) { $('#demoNote').hidden = true; }
+  guestBooted();
   if (window.claude) $('#viewerNote').hidden = false;
 })();
 </script>
