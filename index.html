@@ -120,6 +120,11 @@ select.sel{background:var(--well);border:1px solid var(--line);border-radius:4px
 .thandle::before{content:"";position:absolute;left:7px;top:0;bottom:0;width:2px;background:var(--oxide-hi)}
 .thandle span{position:absolute;left:2px;width:12px;height:20px;top:50%;margin-top:-10px;background:var(--oxide-hi);border-radius:3px}
 .thandle:focus-visible span{box-shadow:0 0 0 2px var(--teal)}
+.fenv{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+.fenv .fline{fill:none;stroke:var(--teal);stroke-width:2;vector-effect:non-scaling-stroke}
+.fenv .fshade{fill:color-mix(in srgb,var(--bg) 55%,transparent)}
+.fhandle{position:absolute;top:3px;width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--teal);border:2px solid var(--well);cursor:ew-resize;z-index:3;outline:none;touch-action:none}
+.fhandle:focus-visible{box-shadow:0 0 0 2px var(--ink)}
 .btn[aria-expanded="true"]{border-color:var(--oxide-hi);color:var(--oxide-hi)}
 .drop{border:1.5px dashed var(--line);border-radius:6px;padding:22px 16px;text-align:center;color:var(--muted);display:grid;gap:8px;place-items:center}
 .drop.over{border-color:var(--oxide-hi);background:color-mix(in srgb,var(--oxide) 12%,transparent);color:var(--ink)}
@@ -572,24 +577,55 @@ function setStripChannel(t, ch) {
 /* Trimming: t.src is the whole decoded file; t.clip is the trimmed part that goes on the tape. */
 const MIN_TRIM = 0.02;
 const isTrimmed = t => t.trimIn > 0.0005 || t.trimOut < t.src.duration - 0.0005;
+const hasFades = t => t.fadeIn > 0.0005 || t.fadeOut > 0.0005;
+/* Fade shapes, as gain for x going 0 → 1 */
+const FADE_CURVES = {
+  linear: { label: 'Linear', g: x => x },
+  power: { label: 'Equal power', g: x => Math.sin(x * Math.PI / 2) },
+  exp: { label: 'Exponential', g: x => x * x * x }
+};
+const fadeGain = (t, x) => (FADE_CURVES[t.fadeCurve] || FADE_CURVES.power).g(clamp(x, 0, 1));
+function clampFades(t) {
+  const len = t.trimOut - t.trimIn;
+  t.fadeIn = clamp(t.fadeIn || 0, 0, len);
+  t.fadeOut = clamp(t.fadeOut || 0, 0, len - t.fadeIn);
+}
 function makeClip(t) {
   const src = t.src, sr = src.sampleRate;
   const a = clamp(Math.round(t.trimIn * sr), 0, src.length - 1), end = clamp(Math.round(t.trimOut * sr), a + 1, src.length);
-  if (a === 0 && end === src.length) return src;
+  if (a === 0 && end === src.length && !hasFades(t)) return src;
   const n = end - a, out = new AudioBuffer({ numberOfChannels: src.numberOfChannels, length: n, sampleRate: sr });
-  const fade = Math.min(Math.round(sr * 0.004), n >> 2);
+  const click = Math.min(Math.round(sr * 0.004), n >> 2);
+  const fi = Math.min(n, Math.round(t.fadeIn * sr)), fo = Math.min(n - fi, Math.round(t.fadeOut * sr));
+  const inN = fi > click ? fi : (a > 0 ? click : 0), outN = fo > click ? fo : (end < src.length ? click : 0);
+  const gIn = new Float32Array(inN), gOut = new Float32Array(outN);
+  for (let i = 0; i < inN; i++) gIn[i] = fi > click ? fadeGain(t, i / fi) : i / inN;
+  for (let i = 0; i < outN; i++) gOut[i] = fo > click ? fadeGain(t, i / fo) : i / outN;
   for (let c = 0; c < src.numberOfChannels; c++) {
     const d = out.getChannelData(c); d.set(src.getChannelData(c).subarray(a, end));
-    if (a > 0) for (let i = 0; i < fade; i++) d[i] *= i / fade;
-    if (end < src.length) for (let i = 0; i < fade; i++) d[n - 1 - i] *= i / fade;
+    for (let i = 0; i < inN; i++) d[i] *= gIn[i];
+    for (let i = 0; i < outN; i++) d[n - 1 - i] *= gOut[i];
   }
   return out;
+}
+function setFade(t, which, v) {
+  if (!isFinite(v)) return;
+  const len = t.trimOut - t.trimIn;
+  if (which === 'in') t.fadeIn = clamp(v, 0, len - t.fadeOut);
+  else t.fadeOut = clamp(v, 0, len - t.fadeIn);
+  t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t);
+}
+function parseFadeTime(str) {
+  const s = String(str).trim().toLowerCase(), x = parseFloat(s.replace(/[^0-9.]/g, ''));
+  if (isNaN(x)) return NaN;
+  return /\ds$|\d\s*s$|sec/.test(s) && !/ms/.test(s) ? x : x / 1000;
 }
 function setTrim(t, which, v) {
   if (!isFinite(v)) return;
   const D = t.src.duration;
   if (which === 'in') t.trimIn = clamp(v, 0, Math.max(0, t.trimOut - MIN_TRIM));
   else t.trimOut = clamp(v, Math.min(D, t.trimIn + MIN_TRIM), D);
+  clampFades(t);
   t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t);
 }
 function createTape(o) {
@@ -602,6 +638,8 @@ function createTape(o) {
   t.src = o.clip;
   t.trimIn = clamp(o.trimIn || 0, 0, o.clip.duration);
   t.trimOut = o.trimOut != null ? clamp(o.trimOut, Math.min(o.clip.duration, t.trimIn + MIN_TRIM), o.clip.duration) : o.clip.duration;
+  t.fadeIn = +o.fadeIn || 0; t.fadeOut = +o.fadeOut || 0; t.fadeCurve = FADE_CURVES[o.fadeCurve] ? o.fadeCurve : 'power';
+  clampFades(t);
   t.clip = makeClip(t);
   if (!o.tapeLen) t.tapeLen = Math.max(1, Math.round(t.clip.duration * 2 * 10) / 10);
   registerTapeCtls(t);
@@ -625,7 +663,7 @@ function removeTape(t) {
 }
 function renumber() { S.tapes.forEach((t, i) => { if (t.ui) t.ui.no.textContent = String(i + 1).padStart(2, '0'); }); }
 function duplicateTape(t) {
-  createTape({ name: t.name + ' copy', clip: t.src, trimIn: t.trimIn, trimOut: t.trimOut, srcBytes: t.srcBytes, srcType: t.srcType, srcName: t.srcName, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, p: Object.assign({}, t.p, { solo: false }) });
+  createTape({ name: t.name + ' copy', clip: t.src, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, srcBytes: t.srcBytes, srcType: t.srcType, srcName: t.srcName, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, p: Object.assign({}, t.p, { solo: false }) });
   renumber();
 }
 async function decodeBytes(bytes) { return await DEC.decodeAudioData(bytes.slice(0)); }
@@ -642,7 +680,7 @@ async function addFiles(files) {
 async function replaceAudio(t, f) {
   try {
     const bytes = await f.arrayBuffer(); const buf = await decodeBytes(bytes);
-    t.src = buf; t.trimIn = 0; t.trimOut = buf.duration; t.clip = buf; t._clipDirty = false;
+    t.src = buf; t.trimIn = 0; t.trimOut = buf.duration; t.fadeIn = 0; t.fadeOut = 0; t.clip = buf; t._clipDirty = false;
     t.srcBytes = bytes; t.srcType = f.type; t.srcName = f.name;
     if (t.offset >= t.tapeLen) t.offset = 0;
     rebuild(t); drawTrimWave(t); updateTrimUI(t); toast(`Loaded ${f.name} onto ${t.name}.`);
@@ -718,19 +756,32 @@ function buildTrim(t) {
   ui.hIn = h('div', { class: 'thandle in', tabindex: 0, role: 'slider', 'aria-label': 'Trim start' }, h('span'));
   ui.hOut = h('div', { class: 'thandle out', tabindex: 0, role: 'slider', 'aria-label': 'Trim end' }, h('span'));
   ui.trimHead = h('div', { class: 'playhead', hidden: true });
-  ui.trimWrap = h('div', { class: 'trimwrap' }, ui.trimCv, ui.tShadeL, ui.tShadeR, ui.tSel, ui.hIn, ui.hOut, ui.trimHead);
+  ui.fEnv = document.createElementNS(SVGNS, 'svg');
+  for (const [k, v] of Object.entries({ class: 'fenv', viewBox: '0 0 1000 100', preserveAspectRatio: 'none', 'aria-hidden': 'true' })) ui.fEnv.setAttribute(k, v);
+  ui.fEnv.innerHTML = '<path class="fshade"/><path class="fline"/>';
+  ui.fhIn = h('div', { class: 'fhandle in', tabindex: 0, role: 'slider', 'aria-label': 'Fade in length', title: 'Drag to set the fade in' });
+  ui.fhOut = h('div', { class: 'fhandle out', tabindex: 0, role: 'slider', 'aria-label': 'Fade out length', title: 'Drag to set the fade out' });
+  ui.trimWrap = h('div', { class: 'trimwrap' }, ui.trimCv, ui.tShadeL, ui.tShadeR, ui.fEnv, ui.tSel, ui.hIn, ui.hOut, ui.fhIn, ui.fhOut, ui.trimHead);
   ui.inPot = potEl({ name: 'Trim start', label: 'Start', get: () => t.trimIn, set: v => setTrim(t, 'in', v),
     norm: v => v / t.src.duration, denorm: n => n * t.src.duration, dflt: 0, disp: v => dispFor('s3', v), parse: x => parseFor('s', x) }, 'row');
   ui.outPot = potEl({ name: 'Trim end', label: 'End', get: () => t.trimOut, set: v => setTrim(t, 'out', v),
     norm: v => v / t.src.duration, denorm: n => n * t.src.duration, get dflt() { return t.src.duration; }, disp: v => dispFor('s3', v), parse: x => parseFor('s', x) }, 'row');
   ui.trimLen = h('span', { class: 'readout' });
+  const fadeNorm = v => Math.sqrt(clamp(v / (t.trimOut - t.trimIn), 0, 1)), fadeDenorm = n => n * n * (t.trimOut - t.trimIn);
+  ui.fiPot = potEl({ name: 'Fade in length', label: 'Fade in', get: () => t.fadeIn, set: v => setFade(t, 'in', v),
+    norm: fadeNorm, denorm: fadeDenorm, dflt: 0, disp: v => dispFor('ms', v), parse: parseFadeTime }, 'row');
+  ui.foPot = potEl({ name: 'Fade out length', label: 'Fade out', get: () => t.fadeOut, set: v => setFade(t, 'out', v),
+    norm: fadeNorm, denorm: fadeDenorm, dflt: 0, disp: v => dispFor('ms', v), parse: parseFadeTime }, 'row');
+  ui.curveBtns = Object.entries(FADE_CURVES).map(([k, c]) => h('button', { 'aria-pressed': 'false', 'data-curve': k, onclick: () => { t.fadeCurve = k; t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t); } }, c.label));
+  const noFades = h('button', { class: 'btn small', onclick: () => { t.fadeIn = 0; t.fadeOut = 0; t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t); } }, 'Clear fades');
   ui.audBtn = h('button', { class: 'btn small' }, 'Audition');
   const resetBtn = h('button', { class: 'btn small', onclick: () => { t.trimIn = 0; t.trimOut = t.src.duration; t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t); } }, 'Reset to whole file');
   ui.trimPanel = h('div', { class: 'trim', hidden: true },
     h('div', { class: 'trim-head' }, h('span', { class: 'lbl' }, 'Trim the source sound'),
-      h('span', { class: 'tape-meta' }, 'Drag the handles to set where the clip starts and stops, or drag the selection to slide it. The full file is kept, so you can widen it again later.')),
+      h('span', { class: 'tape-meta' }, 'Drag the handles to set where the clip starts and stops, or drag the selection to slide it. The round teal handles set the fade in and fade out. The full file is kept, so you can widen it again later.')),
     ui.trimWrap,
-    h('div', { class: 'ctrls' }, ui.inPot.el, ui.outPot.el, h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Clip length'), ui.trimLen), ui.audBtn, resetBtn));
+    h('div', { class: 'ctrls' }, ui.inPot.el, ui.outPot.el, h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Clip length'), ui.trimLen), ui.audBtn, resetBtn),
+    h('div', { class: 'ctrls' }, ui.fiPot.el, ui.foPot.el, h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Fade shape'), h('div', { class: 'seg' }, ...ui.curveBtns)), noFades));
   ui.trimBtn.addEventListener('click', () => {
     const open = ui.trimPanel.hidden;
     ui.trimPanel.hidden = !open; ui.trimBtn.setAttribute('aria-expanded', String(open));
@@ -744,23 +795,35 @@ function buildTrim(t) {
     const toT = x => clamp((x - r.left) / r.width, 0, 1) * D;
     const x0 = toT(e.clientX);
     let mode;
-    if (e.target.closest('.thandle.in')) mode = 'in';
+    if (e.target.closest('.fhandle.in')) mode = 'fin';
+    else if (e.target.closest('.fhandle.out')) mode = 'fout';
+    else if (e.target.closest('.thandle.in')) mode = 'in';
     else if (e.target.closest('.thandle.out')) mode = 'out';
     else if (x0 > t.trimIn && x0 < t.trimOut) mode = 'move';
     else mode = Math.abs(x0 - t.trimIn) < Math.abs(x0 - t.trimOut) ? 'in' : 'out';
     e.preventDefault(); ui.trimWrap.setPointerCapture(e.pointerId);
-    if (mode === 'in') ui.hIn.focus(); else if (mode === 'out') ui.hOut.focus();
+    ({ in: ui.hIn, out: ui.hOut, fin: ui.fhIn, fout: ui.fhOut })[mode]?.focus();
     const a0 = t.trimIn, len = t.trimOut - t.trimIn;
     const move = ev => {
       const x = toT(ev.clientX);
-      if (mode === 'in') setTrim(t, 'in', x);
+      if (mode === 'fin') setFade(t, 'in', x - t.trimIn);
+      else if (mode === 'fout') setFade(t, 'out', t.trimOut - x);
+      else if (mode === 'in') setTrim(t, 'in', x);
       else if (mode === 'out') setTrim(t, 'out', x);
       else { const na = clamp(a0 + (x - x0), 0, D - len); t.trimIn = na; t.trimOut = na + len; t._clipDirty = true; scheduleRebuild(t); updateTrimUI(t); }
     };
-    if (mode !== 'move') move(e);
+    if (mode === 'in' || mode === 'out') move(e);
     ui.trimWrap.onpointermove = move;
     ui.trimWrap.onpointerup = ui.trimWrap.onpointercancel = () => { ui.trimWrap.onpointermove = null; };
   });
+  for (const [el, which] of [[ui.fhIn, 'in'], [ui.fhOut, 'out']]) {
+    el.addEventListener('keydown', e => {
+      const sign = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+      if (!sign) return; e.preventDefault();
+      const d = (e.shiftKey ? 0.1 : 0.01) * sign * (which === 'in' ? 1 : -1);
+      setFade(t, which, (which === 'in' ? t.fadeIn : t.fadeOut) + d);
+    });
+  }
   for (const [el, which] of [[ui.hIn, 'in'], [ui.hOut, 'out']]) {
     el.addEventListener('keydown', e => {
       const d = (e.shiftKey ? 0.1 : 0.01) * (e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : 0);
@@ -780,7 +843,21 @@ function updateTrimUI(t) {
   ui.hOut.setAttribute('aria-valuenow', t.trimOut.toFixed(3)); ui.hOut.setAttribute('aria-valuetext', t.trimOut.toFixed(3) + ' seconds');
   ui.inPot.render(); ui.outPot.render();
   ui.trimLen.textContent = `${(t.trimOut - t.trimIn).toFixed(3)} s of ${D.toFixed(2)} s`;
-  ui.trimBtn.textContent = isTrimmed(t) ? 'Trim ✓' : 'Trim';
+  ui.trimBtn.textContent = isTrimmed(t) || hasFades(t) ? 'Trim ✓' : 'Trim';
+  // fade envelope across the selection
+  const xi = t.trimIn / D * 1000, xo = t.trimOut / D * 1000, xfi = (t.trimIn + t.fadeIn) / D * 1000, xfo = (t.trimOut - t.fadeOut) / D * 1000;
+  const pts = [], N = 24;
+  if (t.fadeIn > 0.0005) for (let i = 0; i <= N; i++) pts.push([xi + (xfi - xi) * i / N, 100 - 92 * fadeGain(t, i / N)]);
+  else pts.push([xi, 8]);
+  if (t.fadeOut > 0.0005) for (let i = N; i >= 0; i--) pts.push([xfo + (xo - xfo) * (1 - i / N), 100 - 92 * fadeGain(t, i / N)]);
+  else pts.push([xo, 8]);
+  const line = 'M' + pts.map(p => p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('L');
+  ui.fEnv.querySelector('.fline').setAttribute('d', line);
+  ui.fEnv.querySelector('.fshade').setAttribute('d', line + `L${xo.toFixed(1)} 0L${xi.toFixed(1)} 0Z`);
+  ui.fhIn.style.left = (xfi / 10) + '%'; ui.fhOut.style.left = (xfo / 10) + '%';
+  ui.fhIn.setAttribute('aria-valuetext', Math.round(t.fadeIn * 1000) + ' ms'); ui.fhOut.setAttribute('aria-valuetext', Math.round(t.fadeOut * 1000) + ' ms');
+  ui.fiPot.render(); ui.foPot.render();
+  ui.curveBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.curve === t.fadeCurve)));
 }
 function drawTrimWave(t) {
   const cv = t.ui.trimCv; sizeCanvas(cv);
@@ -823,7 +900,7 @@ function updateCardFields(t) {
   const pad = t.mode === 'pad', D = t.clip.duration, L = loopLen(t);
   ui.bLoop.setAttribute('aria-pressed', String(!pad)); ui.bPad.setAttribute('aria-pressed', String(pad));
   ui.rev.setAttribute('aria-pressed', String(t.reverse));
-  ui.meta.textContent = `Clip ${fmtS(D)}${isTrimmed(t) ? ` (trimmed from ${fmtS(t.src.duration)})` : ''} · ${t.clip.numberOfChannels === 1 ? 'mono' : 'stereo'}`;
+  ui.meta.textContent = `Clip ${fmtS(D)}${isTrimmed(t) ? ` (trimmed from ${fmtS(t.src.duration)})` : ''}${hasFades(t) ? ' · fades' : ''} · ${t.clip.numberOfChannels === 1 ? 'mono' : 'stereo'}`;
   updateTrimUI(t);
   ui.lenPot.setDisabled(!pad); ui.offPot.setDisabled(!pad);
   ui.lenPot.el.title = pad ? '' : 'In Loop clip mode the tape is exactly as long as the sound.';
@@ -1383,7 +1460,7 @@ async function saveProject() {
   }
   const proj = {
     app: 'tape-loop-deck', version: 1, name: $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
-    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut,
+    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve,
       audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } }))
   };
   await offerFile(fileBase() + '.json', new Blob([JSON.stringify(proj)], { type: 'application/json' }));
@@ -1403,7 +1480,7 @@ async function loadProject(file) {
     try {
       const bytes = b64ToAb(pt.audio.data), clip = await decodeBytes(bytes);
       made.push(createTape({ name: pt.name, clip, srcBytes: bytes, srcType: pt.audio.type, srcName: pt.audio.name,
-        mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, trimIn: pt.trimIn, trimOut: pt.trimOut, quiet: true }));
+        mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, trimIn: pt.trimIn, trimOut: pt.trimOut, fadeIn: pt.fadeIn, fadeOut: pt.fadeOut, fadeCurve: pt.fadeCurve, quiet: true }));
     } catch (e) { made.push(null); toast(`Couldn't decode the audio for ${pt.name}.`); }
   }
   for (const [k, m] of Object.entries(proj.midiMap || {})) {
@@ -1640,7 +1717,7 @@ function guestCapture() {
   return {
     app: 'tape-loop-deck', version: 1, audioIncluded: false,
     name: $('#projName').value, snap: S.snap, master: { vol: S.master.vol },
-    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, trimIn: t.trimIn, trimOut: t.trimOut, p: Object.assign({}, t.p) }))
+    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, p: Object.assign({}, t.p) }))
   };
 }
 function guestApply(st) {
@@ -1665,8 +1742,14 @@ function guestApply(st) {
     const tiIn = num(pt.trimIn, 0, t.src.duration), tiOut = num(pt.trimOut, 0, t.src.duration);
     if (tiIn !== null || tiOut !== null) {
       const a = tiIn ?? 0, b = tiOut ?? t.src.duration;
-      if (b - a >= MIN_TRIM) { t.trimIn = a; t.trimOut = b; t._clipDirty = true; updateTrimUI(t); }
+      if (b - a >= MIN_TRIM) { t.trimIn = a; t.trimOut = b; t._clipDirty = true; }
     }
+    const gfi = num(pt.fadeIn, 0, 600), gfo = num(pt.fadeOut, 0, 600);
+    if (gfi !== null) t.fadeIn = gfi;
+    if (gfo !== null) t.fadeOut = gfo;
+    if (FADE_CURVES[pt.fadeCurve]) t.fadeCurve = pt.fadeCurve;
+    if (gfi !== null || gfo !== null || pt.fadeCurve) t._clipDirty = true;
+    clampFades(t); updateTrimUI(t);
     if (pt.p && typeof pt.p === 'object') for (const [k, spec] of Object.entries(CH)) {
       if (k === 'speed' || !(k in pt.p)) continue;
       if (spec.toggle) { if (typeof pt.p[k] === 'boolean') t.p[k] = pt.p[k]; }
