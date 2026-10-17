@@ -6,7 +6,7 @@ A virtual tape loop player that runs entirely in the browser (Web Audio API).
 - **Scenes:** built-in sets (Studio demo, Nature, Microhouse, Empty deck), all synthesized in the browser. Save your current set as a named scene and recall it later; saved scenes, audio included, are kept in your browser.
 - **Mixer:** a performance console with one strip per tape: gain, 3-band EQ with sweepable mid, an effects bus (tape drive, echo, reverb), tape speed, balance, volume fader, mute and solo.
 - **MIDI:** every major control is mappable. Each strip gets its own MIDI channel with a default CC layout, and MIDI learn remaps anything. Needs a browser with Web MIDI (Chrome, Edge, Opera).
-- **Capture:** record bar-exact clips straight from Logic Rhythm, Boolean Melody Machine, Choir and Pocket Grains running in other tabs. See [Capture from apps](#capture-from-apps).
+- **Capture:** record bar-exact clips straight from Logic Rhythm, Boolean Melody Machine, Choir, Pocket Grains, Pocket Mouse and Padfield running in other tabs. See [Capture from apps](#capture-from-apps).
 - **Save & export:** projects save as a .json file with the audio included. Export the mix as WAV or MP3, or a MIDI file with one track per tape.
 - Dark and light themes.
 
@@ -14,7 +14,7 @@ Nothing is uploaded; all audio stays in your browser.
 
 ## Capture from apps
 
-Tape Loop Deck can record clips straight from Logic Rhythm, Boolean Melody Machine, Choir and Pocket Grains.
+Tape Loop Deck can record clips straight from Logic Rhythm, Boolean Melody Machine, Choir, Pocket Grains, Pocket Mouse and Padfield (Finger Drums, while its click is running). Axis Stack is listed too but has no bar grid, so use its own Export bar for it.
 
 1. Open the deck and one or more of those apps in tabs or windows of the **same browser**.
 2. Press play in the app. In the deck's **Capture from** bar (under the scenes), pick the app and a length (1 to 16 bars).
