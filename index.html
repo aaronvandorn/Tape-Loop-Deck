@@ -71,6 +71,12 @@ main{max-width:1400px;margin:0 auto;padding-block:18px 48px;padding-inline:16px}
 .room[hidden]{display:none!important}
 
 /* ---------- deck room */
+.scenebar{display:grid;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin-bottom:14px}
+.scenerow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.scenerow .grow{flex:1 1 auto}
+.scenerow select{min-width:170px;padding:6px 8px;font-size:15px}
+.scenerow input{background:var(--well);border:1px solid var(--line);border-radius:4px;padding:6px 8px;width:190px;max-width:100%}
+.scene-desc{color:var(--muted);font-size:14px;min-height:1.3em}
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-bottom:14px}
 .toolbar .hint{color:var(--muted);font-size:14px}
 .lbl{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
@@ -270,9 +276,18 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
 
 <main>
   <section class="room" id="room-deck" role="tabpanel" aria-labelledby="tab-deck">
-    <div class="notice" id="demoNote">
-      <span><b>Three demo tapes are loaded</b> — two chords padded with silence, a bell figure, and a drone. Press play to hear them drift against each other.</span>
-      <button class="btn small" id="clearDemo">Remove demo tapes</button>
+    <div class="scenebar" aria-label="Scenes">
+      <div class="scenerow">
+        <label class="lbl" for="sceneSel">Scene</label>
+        <select class="sel" id="sceneSel"><option value="b:studio">Studio demo</option></select>
+        <button class="btn primary" id="sceneLoad">Load scene</button>
+        <button class="btn small" id="sceneDel" hidden>Delete</button>
+        <span class="grow"></span>
+        <label class="lbl" for="sceneName">Save current set as</label>
+        <input type="text" id="sceneName" maxlength="60" placeholder="Name this set" autocomplete="off">
+        <button class="btn" id="sceneSave">Save scene</button>
+      </div>
+      <div class="scene-desc" id="sceneDesc" aria-live="polite"></div>
     </div>
     <div class="toolbar">
       <button class="btn primary" id="addBtn">Add sounds</button>
@@ -370,7 +385,7 @@ readColors();
 /* ================= state ================= */
 const SR = 44100;
 const DEC = new OfflineAudioContext(2, 1, SR);
-const S = { tapes: [], master: { vol: 0 }, playing: false, t0: 0, midiMap: {}, nextId: 1, snap: 0.5, learn: false, learnTarget: null, tab: 'deck', demo: true, mx: {}, mxOn: true, mxLvl: 0, mxNodes: null };
+const S = { tapes: [], master: { vol: 0 }, playing: false, t0: 0, midiMap: {}, nextId: 1, snap: 0.5, learn: false, learnTarget: null, tab: 'deck', demo: true, mx: {}, mxOn: true, mxLvl: 0, mxNodes: null, scene: null };
 
 const CH = {
   trim:     { label: 'Gain', short: 'Gain', min: -24, max: 24, dflt: 0, fmt: v => (v > 0 ? '+' : '') + v.toFixed(1) + 'dB' },
@@ -1571,27 +1586,35 @@ function abToB64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 
 function b64ToAb(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; }
 const fileBase = () => ($('#projName').value || 'tape-loops').trim().replace(/[^\w\- ]+/g, '').replace(/\s+/g, '-') || 'tape-loops';
 
-async function saveProject() {
+function serializeProject(name) {
   const map = {};
   for (const [id, m] of Object.entries(S.midiMap)) {
     if (id.startsWith('t')) { const tid = +id.slice(1, id.indexOf(':')), idx = S.tapes.findIndex(t => t.id === tid); if (idx >= 0) map[`#${idx}:${id.split(':')[1]}`] = m; }
     else map[id] = m;
   }
   const proj = {
-    app: 'tape-loop-deck', version: 1, name: $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
+    app: 'tape-loop-deck', version: 1, name: name || $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
     mxOn: S.mxOn, mxLvl: S.mxLvl, matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number); return [S.tapes.findIndex(t => t.id === a), S.tapes.findIndex(t => t.id === b), db]; }).filter(r => r[0] >= 0 && r[1] >= 0),
     tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve,
       audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } }))
   };
-  await offerFile(fileBase() + '.json', new Blob([JSON.stringify(proj)], { type: 'application/json' }));
+  return proj;
+}
+async function saveProject() {
+  await offerFile(fileBase() + '.json', new Blob([JSON.stringify(serializeProject())], { type: 'application/json' }));
 }
 async function loadProject(file) {
   let proj;
   try { proj = JSON.parse(await file.text()); } catch (e) { toast('That file isn’t a Tape Loop Deck project.'); return; }
   if (!proj || proj.app !== 'tape-loop-deck' || !Array.isArray(proj.tapes)) { toast('That file isn’t a Tape Loop Deck project.'); return; }
+  await applyProject(proj);
+  S.scene = null; closeSheet();
+}
+async function applyProject(proj, { announce = true } = {}) {
   stop();
   [...S.tapes].forEach(removeTape);
-  S.midiMap = {}; $('#demoNote').hidden = true;
+  const keepMaster = Object.fromEntries(Object.entries(S.midiMap).filter(([k]) => k.startsWith('m:')));
+  S.midiMap = keepMaster;
   $('#projName').value = proj.name || 'tape-loops';
   S.snap = proj.snap ?? 0.5; $('#snapSel').value = String(S.snap);
   S.master = Object.assign({ vol: 0 }, proj.master); applyMaster(); syncCtl('m:vol');
@@ -1612,8 +1635,8 @@ async function loadProject(file) {
     if (k.startsWith('#')) { const idx = +k.slice(1, k.indexOf(':')), key = k.split(':')[1]; if (made[idx]) S.midiMap[`t${made[idx].id}:${key}`] = m; }
     else S.midiMap[k] = m;
   }
-  renumber(); refreshMixer(); refreshMap(); applyMatrix(); closeSheet();
-  toast(`Opened ${proj.name || 'project'} with ${made.filter(Boolean).length} tapes.`);
+  renumber(); refreshMixer(); refreshMap(); applyMatrix();
+  if (announce) toast(`Opened ${proj.name || 'project'} with ${made.filter(Boolean).length} tapes.`);
 }
 async function doExport(fmt) {
   const st = $('#expStatus');
@@ -1664,7 +1687,6 @@ $('#snapSel').addEventListener('change', e => S.snap = +e.target.value);
 $('#midiConnect').addEventListener('click', initMIDI);
 $('#learnBtn').addEventListener('click', () => setLearn(!S.learn));
 $('#learnDone').addEventListener('click', () => setLearn(false));
-$('#clearDemo').addEventListener('click', () => { S.tapes.filter(t => t.demo).forEach(removeTape); $('#demoNote').hidden = true; });
 
 const drop = $('#drop');
 ['dragenter', 'dragover'].forEach(ev => document.addEventListener(ev, e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); drop.classList.add('over'); } }));
@@ -1715,7 +1737,203 @@ function padChord(oc, notes, t0, t1) {
     o.connect(p); p.connect(lp); o.start(t0); o.stop(t1 + 0.6);
   }));
 }
-async function loadDemo() {
+/* ================= scenes: synthesized sound sets ================= */
+/* Every built-in sound is synthesized here, so nothing is downloaded. Loops that sustain a tone use
+   frequencies with a whole number of cycles per loop, and moving filters follow curves that end where
+   they start, so each loop joins without a click. */
+function rng(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function noiseBuf(oc, secs, r) { const b = oc.createBuffer(1, Math.ceil(secs * oc.sampleRate), oc.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = r() * 2 - 1; return b; }
+function noiseSrc(oc, buf, loop = true) { const s = oc.createBufferSource(); s.buffer = buf; s.loop = loop; return s; }
+function impulseBuf(oc) { const n = 64, b = oc.createBuffer(1, n, oc.sampleRate), d = b.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (i % 2 ? -1 : 1) * Math.exp(-i / 6); return b; }
+/* a smooth random curve that ends where it starts: base ± depth, harmonics kmin..kmax cycles per loop */
+function pcurve(r, base, depth, kmin = 1, kmax = 4, n = 512) {
+  const H = []; for (let k = kmin; k <= kmax; k++) H.push([k, r() * (1 / k + 0.3), r() * Math.PI * 2]);
+  const sum = H.reduce((s, x) => s + x[1], 0) || 1, c = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let v = 0; for (const [k, a, ph] of H) v += a * Math.sin(2 * Math.PI * k * i / (n - 1) + ph); c[i] = base + depth * v / sum; }
+  return c;
+}
+const loopF = (f, L) => Math.max(1, Math.round(f * L)) / L;
+async function synthN(dur, build, peak = 0.7, post) {
+  const b = await synth(dur, build);
+  if (post) post(b);
+  let pk = 0; for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > pk) pk = a; } }
+  if (pk > 1e-6) { const k = peak / pk; for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= k; } }
+  return b;
+}
+
+/* ---- nature ---- */
+const sRain = (L = 12) => synthN(L, oc => {
+  const r = rng(101), out = oc.createGain(); out.connect(oc.destination);
+  const nb = noiseBuf(oc, L, r);
+  [-0.7, 0.7].forEach((pan, i) => {
+    const s = noiseSrc(oc, nb), hp = oc.createBiquadFilter(), lp = oc.createBiquadFilter(), g = oc.createGain(), p = oc.createStereoPanner();
+    hp.type = 'highpass'; hp.frequency.value = 450; lp.type = 'lowpass'; lp.frequency.value = 4200 + i * 900; g.gain.value = 0.11; p.pan.value = pan;
+    s.connect(hp); hp.connect(lp); lp.connect(g); g.connect(p); p.connect(out); s.start(0, i * L / 2);
+  });
+}, 0.6, buf => addDrops(buf, rng(111), 900));
+/* raindrops written straight into the buffer: a short noise burst through a resonant band-pass, panned */
+function addDrops(buf, r, count) {
+  const sr = buf.sampleRate, L = buf.duration, Ld = buf.getChannelData(0), Rd = buf.getChannelData(1);
+  for (let k = 0; k < count; k++) {
+    const heavy = r() < 0.15, t = r() * (L - 0.08);
+    const f = heavy ? 400 + r() * 700 : 1800 + r() * 5200, Q = 2 + r() * 7;
+    const amp = (heavy ? 0.5 : 0.25) * (0.15 + Math.pow(r(), 3)), dec = heavy ? 0.03 + r() * 0.04 : 0.008 + r() * 0.02;
+    const w = 2 * Math.PI * f / sr, al = Math.sin(w) / (2 * Q), a0 = 1 + al;
+    const b0 = al / a0, b2 = -al / a0, a1 = -2 * Math.cos(w) / a0, a2 = (1 - al) / a0;
+    const pan = r() * 1.6 - 0.8, gl = Math.cos((pan + 1) * Math.PI / 4), gr = Math.sin((pan + 1) * Math.PI / 4);
+    const start = Math.floor(t * sr), n = Math.floor(dec * sr), att = Math.max(1, Math.floor(0.0015 * sr));
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < n && start + i < Ld.length; i++) {
+      const env = i < att ? i / att : Math.pow(0.0001 / amp, (i - att) / (n - att)) ;
+      const x = (r() * 2 - 1) * amp * env, y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1; x1 = x; y2 = y1; y1 = y;
+      Ld[start + i] += y * gl * 3; Rd[start + i] += y * gr * 3;
+    }
+  }
+}
+const sBirds = (L = 14) => synthN(L, oc => {
+  const r = rng(202), out = oc.createGain(); out.connect(oc.destination);
+  const note = (t, f0, f1, dur, amp, pan, vib = 30, vibD = 0.015) => {
+    const o = oc.createOscillator(), lfo = oc.createOscillator(), lg = oc.createGain(), g = oc.createGain(), p = oc.createStereoPanner();
+    o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    lfo.frequency.value = vib; lg.gain.value = f0 * vibD; lfo.connect(lg); lg.connect(o.frequency);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(amp, t + Math.min(0.012, dur / 3)); g.gain.setValueAtTime(amp, t + dur * 0.6); g.gain.linearRampToValueAtTime(0, t + dur);
+    p.pan.value = pan; o.connect(g); g.connect(p); p.connect(out);
+    o.start(t); lfo.start(t); o.stop(t + dur + 0.01); lfo.stop(t + dur + 0.01);
+  };
+  for (const t0 of [0.4, 3.6, 7.3, 10.4]) {           // a whistler: short melodic phrases
+    let t = t0 + r() * 0.4; const base = 2200 + r() * 900, n = 3 + Math.floor(r() * 4);
+    for (let i = 0; i < n; i++) { const d = 0.07 + r() * 0.12, f = base * (0.85 + r() * 0.4); note(t, f, f * (r() < 0.5 ? 1.25 : 0.8), d, 0.16, -0.45, 28 + r() * 10); t += d + 0.03 + r() * 0.06; }
+  }
+  for (const t0 of [1.9, 6.1, 11.5]) {                // a trill: rapid falling chirps
+    let t = t0 + r() * 0.3; const f = 4600 + r() * 1200, n = 9 + Math.floor(r() * 8);
+    for (let i = 0; i < n; i++) { note(t, f * 1.12, f * 0.82, 0.026, 0.09, 0.5, 60, 0.004); t += 0.045; }
+  }
+  for (const t0 of [4.7, 12.4]) { note(t0, 560, 610, 0.28, 0.12, 0.1, 6, 0.01); note(t0 + 0.45, 610, 520, 0.6, 0.12, 0.1, 5, 0.01); }   // a dove
+}, 0.6);
+const sWind = (L = 20) => synthN(L, oc => {
+  const r = rng(303), nb = noiseBuf(oc, L, r);
+  const s = noiseSrc(oc, nb), lp = oc.createBiquadFilter(), bp = oc.createBiquadFilter(), g = oc.createGain(), p = oc.createStereoPanner();
+  lp.type = 'lowpass'; lp.frequency.value = 1400;
+  bp.type = 'bandpass'; bp.Q.value = 0.9; bp.frequency.setValueCurveAtTime(pcurve(r, 520, 360, 1, 5), 0, L);
+  const gc = pcurve(r, 0.32, 0.26, 1, 4).map(v => Math.max(0.03, v));
+  g.gain.setValueCurveAtTime(gc, 0, L); p.pan.setValueCurveAtTime(pcurve(r, 0, 0.6, 1, 3), 0, L);
+  s.connect(lp); lp.connect(bp); bp.connect(g); g.connect(p); p.connect(oc.destination); s.start(0);
+  const s2 = noiseSrc(oc, nb), bp2 = oc.createBiquadFilter(), g2 = oc.createGain();   // whistling through a gap
+  bp2.type = 'bandpass'; bp2.Q.value = 14; bp2.frequency.setValueCurveAtTime(pcurve(r, 950, 280, 1, 3), 0, L);
+  g2.gain.setValueCurveAtTime(pcurve(r, 0.5, 0.5, 2, 5).map(v => Math.max(0, v)), 0, L);
+  s2.connect(bp2); bp2.connect(g2); g2.connect(oc.destination); s2.start(0, L / 3);
+}, 0.6);
+const sCreek = (L = 8) => synthN(L, oc => {
+  const r = rng(404), nb = noiseBuf(oc, L, r), out = oc.createGain(); out.connect(oc.destination);
+  [[700, -0.4], [1500, 0.3], [3200, 0], [5200, 0.5]].forEach(([f, pan], i) => {
+    const s = noiseSrc(oc, nb), bp = oc.createBiquadFilter(), g = oc.createGain(), p = oc.createStereoPanner();
+    bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = 1.6;
+    g.gain.setValueCurveAtTime(pcurve(r, 0.16, 0.15, 8, 48, 2048), 0, L); p.pan.value = pan;
+    s.connect(bp); bp.connect(g); g.connect(p); p.connect(out); s.start(0, i * L / 4);
+  });
+  for (let k = 0; k < 110; k++) {                     // bubbles
+    const t = r() * (L - 0.1), f = 450 + r() * 1100, d = 0.02 + r() * 0.035;
+    const o = oc.createOscillator(), g = oc.createGain(), p = oc.createStereoPanner();
+    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * (1.5 + r()), t + d);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05 + r() * 0.08, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    p.pan.value = r() * 1.4 - 0.7; o.connect(g); g.connect(p); p.connect(out); o.start(t); o.stop(t + d + 0.01);
+  }
+}, 0.6);
+const sCrickets = (L = 6) => synthN(L, oc => {
+  const r = rng(505);
+  [[4650, 0.42, 3, -0.45, 0.12], [5250, 0.57, 4, 0.4, 0.08]].forEach(([f, per, pulses, pan, amp]) => {
+    const o = oc.createOscillator(), o2 = oc.createOscillator(), g2 = oc.createGain(), g = oc.createGain(), p = oc.createStereoPanner();
+    o.frequency.value = f; o2.frequency.value = f * 2.01; g2.gain.value = 0.25; o2.connect(g2); g2.connect(g);
+    g.gain.value = 0; p.pan.value = pan; o.connect(g); g.connect(p); p.connect(oc.destination);
+    for (let t = 0.05 + r() * 0.2; t < L - 0.2; t += per * (0.9 + r() * 0.2))
+      for (let i = 0; i < pulses; i++) { const a = t + i * 0.024; g.gain.setValueAtTime(0, a); g.gain.linearRampToValueAtTime(amp, a + 0.004); g.gain.setValueAtTime(amp, a + 0.011); g.gain.linearRampToValueAtTime(0, a + 0.016); }
+    o.start(0); o2.start(0);
+  });
+}, 0.5);
+const sThunder = (L = 7) => synthN(L, oc => {
+  const r = rng(606), nb = noiseBuf(oc, L, r);
+  const s = noiseSrc(oc, nb), lp = oc.createBiquadFilter(), lp2 = oc.createBiquadFilter(), g = oc.createGain();
+  lp.type = 'lowpass'; lp.frequency.setValueAtTime(2400, 0); lp.frequency.exponentialRampToValueAtTime(380, 0.5); lp.frequency.exponentialRampToValueAtTime(110, L);
+  lp2.type = 'lowpass'; lp2.frequency.value = 900;
+  g.gain.setValueAtTime(0, 0); g.gain.linearRampToValueAtTime(0.5, 0.04); g.gain.exponentialRampToValueAtTime(0.18, 0.5);
+  let t = 0.6; while (t < L - 1.2) { const pk = 0.25 + r() * 0.4, up = 0.25 + r() * 0.5, dn = 0.4 + r() * 0.9; g.gain.linearRampToValueAtTime(pk, t + up); g.gain.linearRampToValueAtTime(0.12 + r() * 0.08, t + up + dn); t += up + dn; }
+  g.gain.linearRampToValueAtTime(0, L - 0.05);
+  s.connect(lp); lp.connect(lp2); lp2.connect(g); g.connect(oc.destination); s.start(0);
+}, 0.8);
+
+/* ---- microhouse, 124 BPM; every loop is a whole number of bars so they stay locked ---- */
+const MH_B = 60 / 124, MH_BAR = MH_B * 4, MH_16 = MH_B / 4;
+const mhKick = () => synthN(MH_BAR, oc => {
+  const lp = oc.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700; lp.connect(oc.destination);
+  for (let i = 0; i < 4; i++) {
+    const t = i * MH_B + 0.001, o = oc.createOscillator(), g = oc.createGain();
+    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(47, t + 0.08);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.6, t + 0.003); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.connect(g); g.connect(lp); o.start(t); o.stop(t + 0.32);
+  }
+}, 0.8);
+const mhClicks = () => synthN(MH_BAR * 2, oc => {
+  const r = rng(707), imp = impulseBuf(oc), freqs = [2300, 3600, 5100, 7400, 9800];
+  for (let i = 0; i < 32; i++) {
+    const accent = [2, 6, 10, 13, 18, 22, 26, 29].includes(i);
+    if (!accent && r() > 0.32) continue;
+    const t = i * MH_16 + (i % 2 ? 0.017 : 0) + 0.001;   // swung 16ths
+    const s = oc.createBufferSource(), bp = oc.createBiquadFilter(), g = oc.createGain(), p = oc.createStereoPanner();
+    s.buffer = imp; bp.type = 'bandpass'; bp.frequency.value = freqs[Math.floor(r() * freqs.length)]; bp.Q.value = 6 + r() * 14;
+    g.gain.value = (accent ? 1 : 0.45) * (0.5 + r() * 0.5); p.pan.value = r() * 1.2 - 0.6;
+    s.connect(bp); bp.connect(g); g.connect(p); p.connect(oc.destination); s.start(t);
+  }
+}, 0.7);
+const mhCrackle = () => synthN(MH_BAR, oc => {
+  const r = rng(808), nb = noiseBuf(oc, 1, r), imp = impulseBuf(oc);
+  for (let i = 0; i < 4; i++) {                       // offbeat ticks
+    const t = i * MH_B + MH_B / 2, s = noiseSrc(oc, nb, false), hp = oc.createBiquadFilter(), g = oc.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 7500; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.001); g.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
+    s.connect(hp); hp.connect(g); g.connect(oc.destination); s.start(t, r() * 0.9, 0.05);
+  }
+  for (let k = 0; k < 26; k++) {                      // vinyl-ish crackle
+    const t = r() * (MH_BAR - 0.02), s = oc.createBufferSource(), hp = oc.createBiquadFilter(), g = oc.createGain(), p = oc.createStereoPanner();
+    s.buffer = imp; hp.type = 'highpass'; hp.frequency.value = 5000 + r() * 4000; g.gain.value = 0.2 + r() * 0.6; p.pan.value = r() * 2 - 1;
+    s.connect(hp); hp.connect(g); g.connect(p); p.connect(oc.destination); s.start(t);
+  }
+}, 0.6);
+const mhWhirr = () => { const L = MH_BAR * 4; return synthN(L, oc => {
+  const r = rng(909), out = oc.createGain(); out.connect(oc.destination);
+  const lp = oc.createBiquadFilter(), g = oc.createGain(); lp.type = 'lowpass'; lp.Q.value = 9;
+  lp.frequency.setValueCurveAtTime(pcurve(r, 1000, 760, 1, 3), 0, L); g.gain.setValueCurveAtTime(pcurve(r, 0.18, 0.1, 1, 2), 0, L);
+  lp.connect(g); g.connect(out);
+  [55, 55.5].forEach(f => { const o = oc.createOscillator(); o.type = 'sawtooth'; o.frequency.value = loopF(f, L); o.connect(lp); o.start(0); });
+  const m = oc.createOscillator(), bp = oc.createBiquadFilter(), mg = oc.createGain(); m.type = 'square';   // a small motor
+  m.frequency.setValueCurveAtTime(pcurve(r, loopF(170, L), 45, 2, 6), 0, L);
+  bp.type = 'bandpass'; bp.frequency.value = 1300; bp.Q.value = 3; mg.gain.value = 0.05; m.connect(bp); bp.connect(mg); mg.connect(out); m.start(0);
+  const nb = noiseBuf(oc, L, r), s = noiseSrc(oc, nb), bp2 = oc.createBiquadFilter(), ng = oc.createGain();   // flutter
+  bp2.type = 'bandpass'; bp2.Q.value = 7; bp2.frequency.setValueCurveAtTime(pcurve(r, 2400, 1500, 24, 40, 4096), 0, L);
+  ng.gain.value = 0.35; s.connect(bp2); bp2.connect(ng); ng.connect(out); s.start(0);
+}, 0.6); };
+const mhBlips = () => synthN(MH_BAR * 2, oc => {
+  const r = rng(1010), scale = [69, 72, 74, 76, 79, 81, 84, 88];
+  [0, 3, 7, 10, 14, 19, 22, 27, 30].forEach((i, k) => {
+    const t = i * MH_16 + 0.001, n = scale[Math.floor(r() * scale.length)];
+    const o = oc.createOscillator(), o2 = oc.createOscillator(), g2 = oc.createGain(), g = oc.createGain(), p = oc.createStereoPanner();
+    o.type = 'triangle'; o.frequency.value = mtof(n); o2.frequency.value = mtof(n + 12); g2.gain.value = 0.3;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.3, t + 0.002); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09 + r() * 0.08);
+    p.pan.value = k % 2 ? 0.35 : -0.35; o.connect(g); o2.connect(g2); g2.connect(g); g.connect(p); p.connect(oc.destination);
+    o.start(t); o2.start(t); o.stop(t + 0.2); o2.stop(t + 0.2);
+  });
+}, 0.7);
+const mhDrone = () => { const L = MH_BAR * 8; return synthN(L, oc => {
+  const r = rng(1111), lp = oc.createBiquadFilter(), g = oc.createGain();
+  lp.type = 'lowpass'; lp.Q.value = 2.5; lp.frequency.setValueCurveAtTime(pcurve(r, 560, 330, 1, 2), 0, L);
+  g.gain.setValueCurveAtTime(pcurve(r, 0.06, 0.018, 1, 3), 0, L); lp.connect(g); g.connect(oc.destination);
+  [33, 40, 43, 47, 48].forEach((n, i) => [-6, 6].forEach(c => {   // A minor 9 voicing, each voice a detuned pair
+    const o = oc.createOscillator(), p = oc.createStereoPanner(); o.type = i === 0 ? 'triangle' : 'sawtooth';
+    o.frequency.value = loopF(mtof(n) * Math.pow(2, c / 1200), L); p.pan.value = c > 0 ? 0.3 : -0.3; o.connect(p); p.connect(lp); o.start(0);
+  }));
+}, 0.6); };
+
+/* ---- studio demo (the original three tapes) ---- */
+async function buildStudio() {
   const chords = await synth(5.6, oc => { padChord(oc, [48, 55, 59, 64, 67], 0.02, 2.4); padChord(oc, [45, 52, 55, 59, 60, 64], 2.55, 5.0); });
   const bells = await synth(3.2, oc => {
     [[76, 0], [79, 0.42], [74, 1.25], [71, 2.05]].forEach(([n, t]) => {
@@ -1732,13 +1950,177 @@ async function loadDemo() {
     const lp = oc.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(260, 0); lp.frequency.linearRampToValueAtTime(700, 3.2); lp.frequency.linearRampToValueAtTime(240, 7.4); lp.connect(g);
     [[38, 'sawtooth', 0], [38, 'sine', 4], [45, 'triangle', -3], [50, 'sine', 2]].forEach(([n, ty, det]) => { const o = oc.createOscillator(); o.type = ty; o.frequency.value = mtof(n); o.detune.value = det; o.connect(lp); o.start(0); o.stop(7.5); });
   });
-  createTape({ name: 'Two chords', clip: chords, mode: 'pad', tapeLen: 20, offset: 2, note: 60, demo: true, quiet: true, p: { vol: -3, verb: 0.35, echo: 0.12, echoTime: 0.6, hi: -2 } });
-  createTape({ name: 'Bell figure', clip: bells, mode: 'loop', note: 76, demo: true, quiet: true, p: { vol: -7, echo: 0.32, echoTime: 0.43, echoFb: 0.42, verb: 0.3, pan: 0.35, drive: 0.15 } });
-  const demoDrone = createTape({ name: 'Low drone', clip: drone, mode: 'pad', tapeLen: 13, offset: 1, note: 38, demo: true, quiet: true, p: { vol: -5, pan: -0.25, lo: 3, verb: 0.15, mxDelay: 0.12 } });
-  const demoBell = S.tapes.find(t => t.name === 'Bell figure');
-  if (demoBell) S.mx[mxKey(demoBell.id, demoDrone.id)] = -14;   // example route: bells ring on through the drone's channel
-  renumber(); refreshMixer(); refreshMap(); applyMatrix();
+  return {
+    tapes: [
+      { name: 'Two chords', clip: chords, mode: 'pad', tapeLen: 20, offset: 2, note: 60, p: { vol: -3, verb: 0.35, echo: 0.12, echoTime: 0.6, hi: -2 } },
+      { name: 'Bell figure', clip: bells, mode: 'loop', note: 76, p: { vol: -7, echo: 0.32, echoTime: 0.43, echoFb: 0.42, verb: 0.3, pan: 0.35, drive: 0.15 } },
+      { name: 'Low drone', clip: drone, mode: 'pad', tapeLen: 13, offset: 1, note: 38, p: { vol: -5, pan: -0.25, lo: 3, verb: 0.15, mxDelay: 0.12 } }
+    ],
+    mx: [[1, 2, -14]]   // the bells ring on through the drone's channel
+  };
 }
+async function buildNature() {
+  const [rain, birds, wind, creek, crickets, thunder] = await Promise.all([sRain(), sBirds(), sWind(), sCreek(), sCrickets(), sThunder()]);
+  return {
+    tapes: [
+      { name: 'Rain', clip: rain, mode: 'loop', note: 48, p: { vol: -2, hi: -1, verb: 0.12 } },
+      { name: 'Birdsong', clip: birds, mode: 'pad', tapeLen: 21, offset: 3, note: 84, p: { vol: -6, verb: 0.35, echo: 0.12, echoTime: 0.29, echoFb: 0.25 } },
+      { name: 'Wind', clip: wind, mode: 'loop', note: 36, p: { vol: -4, lo: 2, hi: -3, mxDelay: 0.25 } },
+      { name: 'Creek', clip: creek, mode: 'loop', note: 72, p: { vol: -9, pan: 0.45, hi: 1, verb: 0.08 } },
+      { name: 'Crickets', clip: crickets, mode: 'loop', note: 96, p: { vol: -13, pan: -0.35, verb: 0.25 } },
+      { name: 'Distant thunder', clip: thunder, mode: 'pad', tapeLen: 31, offset: 9, note: 28, p: { vol: -1, lo: 3, verb: 0.55 } }
+    ],
+    mx: [[5, 2, -12]]   // thunder rolls on through the wind
+  };
+}
+async function buildMicro() {
+  const [kick, clicks, crackle, whirr, blips, drone] = await Promise.all([mhKick(), mhClicks(), mhCrackle(), mhWhirr(), mhBlips(), mhDrone()]);
+  const dot8 = MH_B * 0.75;
+  return {
+    tapes: [
+      { name: 'Soft kick', clip: kick, mode: 'loop', note: 36, p: { vol: -6, lo: 2 } },
+      { name: 'Clicks', clip: clicks, mode: 'loop', note: 75, p: { vol: -2, trim: 4, pan: 0.1, verb: 0.12 } },
+      { name: 'Crackle', clip: crackle, mode: 'loop', note: 42, p: { vol: -9, pan: -0.2, hi: 2 } },
+      { name: 'Whirr', clip: whirr, mode: 'loop', note: 33, p: { vol: -14, pan: -0.25, drive: 0.3, echo: 0.18, echoTime: dot8, echoFb: 0.3, mxDelay: dot8 } },
+      { name: 'Blips', clip: blips, mode: 'loop', note: 81, p: { vol: -11, pan: 0.3, echo: 0.35, echoTime: dot8, echoFb: 0.45, verb: 0.3 } },
+      { name: 'Drone', clip: drone, mode: 'loop', note: 45, p: { vol: -8, lo: 2, verb: 0.4, mxDelay: MH_16 } }
+    ],
+    mx: [[1, 5, -15], [4, 3, -14]]   // clicks excite the drone on a 16th-note delay; blips feed the whirr
+  };
+}
+const SCENES = {
+  studio: { name: 'Studio demo', file: 'studio-demo', desc: 'Two chords padded with silence, a bell figure and a drone, drifting against each other. One matrix send carries the bells into the drone.', build: buildStudio },
+  nature: { name: 'Nature', file: 'nature', desc: 'Rain, birdsong, wind, a creek, crickets and distant thunder. Each loops at a different length, so the scene keeps shifting.', build: buildNature },
+  micro: { name: 'Microhouse', file: 'microhouse', desc: 'A soft kick, clicks, crackle, whirrs, blips and a drone, all at 124 BPM in whole-bar loops so they stay locked together.', build: buildMicro },
+  empty: { name: 'Empty deck', file: 'tape-loops', desc: 'No tapes. Start from your own sounds.', build: async () => ({ tapes: [], mx: [] }) }
+};
+
+/* ---- saved scenes: kept in this browser (IndexedDB), audio included ---- */
+const SceneStore = {
+  db: null,
+  open() {
+    if (this.db) return this.db;
+    return this.db = new Promise((res, rej) => {
+      if (!window.indexedDB) { rej(new Error('no IndexedDB')); return; }
+      const rq = indexedDB.open('tape-loop-deck', 1);
+      rq.onupgradeneeded = () => { const d = rq.result; d.createObjectStore('scenes', { keyPath: 'id' }); d.createObjectStore('sceneData', { keyPath: 'id' }); };
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
+    });
+  },
+  async run(stores, mode, fn) {
+    const d = await this.open();
+    return new Promise((res, rej) => { const tx = d.transaction(stores, mode); let out; Promise.resolve(fn(tx, v => out = v)); tx.oncomplete = () => res(out); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error); });
+  },
+  list() { return this.run(['scenes'], 'readonly', (tx, set) => { const rq = tx.objectStore('scenes').getAll(); rq.onsuccess = () => set(rq.result || []); }); },
+  get(id) { return this.run(['sceneData'], 'readonly', (tx, set) => { const rq = tx.objectStore('sceneData').get(id); rq.onsuccess = () => set(rq.result); }); },
+  put(meta, proj) { return this.run(['scenes', 'sceneData'], 'readwrite', tx => { tx.objectStore('scenes').put(meta); tx.objectStore('sceneData').put({ id: meta.id, proj }); }); },
+  del(id) { return this.run(['scenes', 'sceneData'], 'readwrite', tx => { tx.objectStore('scenes').delete(id); tx.objectStore('sceneData').delete(id); }); }
+};
+let savedScenes = [], sceneStoreOK = true, sceneBusy = false;
+
+function clearDeck() {
+  stop();
+  [...S.tapes].forEach(removeTape);
+  S.mx = {}; S.mxOn = true; S.mxLvl = 0; syncCtl('m:mxOn'); syncCtl('m:mxLvl');
+}
+async function loadScene(key, { announce = true } = {}) {
+  if (sceneBusy) return false;
+  sceneBusy = true; setSceneBusy(true);
+  try {
+    if (key.startsWith('b:')) {
+      const sc = SCENES[key.slice(2)]; if (!sc) throw new Error('Unknown scene');
+      const data = sc.cache || (sc.cache = await sc.build());
+      clearDeck();
+      const made = data.tapes.map(sp => createTape(Object.assign({}, sp, { p: Object.assign({}, sp.p), quiet: true })));
+      for (const [i, j, db] of data.mx) if (made[i] && made[j]) S.mx[mxKey(made[i].id, made[j].id)] = db;
+      $('#projName').value = sc.file;
+      renumber(); refreshMixer(); refreshMap(); applyMatrix();
+      if (announce) toast(made.length ? `Loaded ${sc.name}: ${made.length} tapes.` : 'Cleared the deck.');
+    } else {
+      const id = key.slice(2), meta = savedScenes.find(m => m.id === id), rec = await SceneStore.get(id);
+      if (!rec) throw new Error('That saved scene is missing from this browser.');
+      await applyProject(rec.proj, { announce: false });
+      if (announce) toast(`Loaded ${meta ? meta.name : 'scene'}: ${S.tapes.length} tapes.`);
+    }
+    S.scene = key;
+    try { localStorage.setItem('tld-scene', key); } catch (e) {}
+    $('#sceneSel').value = key; updateSceneDesc();
+    return true;
+  } catch (e) {
+    toast('Couldn’t load that scene. ' + (e && e.message ? e.message : ''));
+    return false;
+  } finally { sceneBusy = false; setSceneBusy(false); }
+}
+function setSceneBusy(on) {
+  for (const id of ['sceneLoad', 'sceneSave', 'sceneDel', 'sceneSel']) $('#' + id).disabled = on || (id === 'sceneSave' && !sceneStoreOK);
+  if (!on) updateSceneDesc();
+  else $('#sceneDesc').textContent = 'Building the scene…';
+}
+async function refreshSceneList() {
+  try { savedScenes = (await SceneStore.list()).sort((a, b) => b.savedAt - a.savedAt); }
+  catch (e) { savedScenes = []; sceneStoreOK = false; }
+  const sel = $('#sceneSel'), cur = sel.value || S.scene || 'b:studio';
+  sel.innerHTML = '';
+  sel.append(h('optgroup', { label: 'Built in' }, ...Object.entries(SCENES).map(([k, sc]) => h('option', { value: 'b:' + k }, sc.name))));
+  if (savedScenes.length) sel.append(h('optgroup', { label: 'Your scenes' }, ...savedScenes.map(m => h('option', { value: 'u:' + m.id }, m.name))));
+  sel.value = [...sel.options].some(o => o.value === cur) ? cur : 'b:studio';
+  $('#sceneSave').disabled = !sceneStoreOK;
+  if (!sceneStoreOK) $('#sceneSave').title = 'This browser isn’t letting the page store scenes. Use Save project instead.';
+  updateSceneDesc();
+}
+function updateSceneDesc() {
+  const key = $('#sceneSel').value || '', d = $('#sceneDesc');
+  $('#sceneDel').hidden = !key.startsWith('u:');
+  if (key.startsWith('b:')) { d.textContent = SCENES[key.slice(2)].desc; return; }
+  const m = savedScenes.find(x => x.id === key.slice(2));
+  d.textContent = m ? `Saved ${new Date(m.savedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${m.tapes} tape${m.tapes === 1 ? '' : 's'} · ${(m.bytes / 1048576).toFixed(1)} MB, kept in this browser` : '';
+  if (m && !$('#sceneName').value) $('#sceneName').placeholder = m.name;
+}
+function armButton(btn, label, ms = 2600) {
+  if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; clearTimeout(btn._t); return true; }
+  btn.dataset.label = btn.dataset.label || btn.textContent;
+  btn.dataset.armed = '1'; btn.textContent = label;
+  clearTimeout(btn._t); btn._t = setTimeout(() => { delete btn.dataset.armed; btn.textContent = btn.dataset.label; }, ms);
+  return false;
+}
+$('#sceneSel').addEventListener('change', () => { const b = $('#sceneLoad'); if (b.dataset.armed) armButton(b); updateSceneDesc(); });
+$('#sceneLoad').addEventListener('click', () => {
+  const b = $('#sceneLoad');
+  if (S.tapes.length && !b.dataset.armed) { armButton(b, `Replace ${S.tapes.length} tape${S.tapes.length === 1 ? '' : 's'}?`); return; }
+  if (b.dataset.armed) armButton(b);
+  loadScene($('#sceneSel').value);
+});
+$('#sceneSave').addEventListener('click', async () => {
+  const b = $('#sceneSave'), input = $('#sceneName');
+  const name = (input.value || input.placeholder || '').trim().slice(0, 60);
+  if (!name || name === 'Name this set') { input.focus(); toast('Give the scene a name first.'); return; }
+  if (!S.tapes.length) { toast('Add some tapes before saving a scene.'); return; }
+  const existing = savedScenes.find(m => m.name.toLowerCase() === name.toLowerCase());
+  if (existing && !b.dataset.armed) { armButton(b, `Overwrite “${existing.name}”?`); return; }
+  if (b.dataset.armed) armButton(b);
+  b.disabled = true;
+  try {
+    const proj = serializeProject(name);
+    const bytes = JSON.stringify(proj).length;
+    const meta = { id: existing ? existing.id : 's' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36), name, savedAt: Date.now(), tapes: S.tapes.length, bytes };
+    await SceneStore.put(meta, proj);
+    S.scene = 'u:' + meta.id;
+    try { localStorage.setItem('tld-scene', S.scene); } catch (e) {}
+    await refreshSceneList(); $('#sceneSel').value = S.scene; input.value = ''; updateSceneDesc();
+    toast(`Saved scene “${name}”.`);
+  } catch (e) {
+    toast(e && e.name === 'QuotaExceededError' ? 'The browser is out of room for saved scenes. Delete an old one or use Save project instead.' : 'Couldn’t save the scene here. Use Save project instead.');
+  } finally { b.disabled = !sceneStoreOK; }
+});
+$('#sceneName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#sceneSave').click(); } });
+$('#sceneDel').addEventListener('click', async () => {
+  const b = $('#sceneDel'), key = $('#sceneSel').value; if (!key.startsWith('u:')) return;
+  const m = savedScenes.find(x => x.id === key.slice(2));
+  if (!armButton(b, `Delete “${m ? m.name : 'scene'}”?`)) return;
+  try { await SceneStore.del(key.slice(2)); toast(`Deleted “${m ? m.name : 'scene'}”. The tapes on the deck stay as they are.`); if (S.scene === key) S.scene = null; }
+  catch (e) { toast('Couldn’t delete that scene.'); }
+  $('#sceneSel').value = 'b:studio'; await refreshSceneList();
+});
 
 /* ================= matrix panel ================= */
 $('#mxMaster').append(h('div', { class: 'ms' }, toggleEl('m:mxOn', 'solo', 'Matrix on')), ctlPot('m:mxLvl', 'row', 'Matrix level'));
@@ -1857,6 +2239,7 @@ function guestCapture() {
   return {
     app: 'tape-loop-deck', version: 1, audioIncluded: false,
     name: $('#projName').value, snap: S.snap, master: { vol: S.master.vol },
+    scene: S.scene && S.scene.startsWith('b:') ? S.scene : null,
     mxOn: S.mxOn, mxLvl: S.mxLvl,
     matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number), A = S.tapes.find(t => t.id === a), B = S.tapes.find(t => t.id === b); return A && B ? { from: A.name, to: B.name, db } : null; }).filter(Boolean),
     tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, p: Object.assign({}, t.p) }))
@@ -1865,6 +2248,11 @@ function guestCapture() {
 function guestApply(st) {
   if (!st || typeof st !== 'object' || Array.isArray(st)) return;
   if (!G.booted) { G.pending = st; return; }
+  // a built-in scene can be rebuilt here, so Discobot only needs its name, not the audio
+  if (typeof st.scene === 'string' && st.scene.startsWith('b:') && SCENES[st.scene.slice(2)] && S.scene !== st.scene && !st._sceneLoaded) {
+    loadScene(st.scene, { announce: false }).then(ok => guestApply(Object.assign({}, st, { _sceneLoaded: true, scene: ok ? st.scene : null })));
+    return;
+  }
   const num = (v, lo, hi) => typeof v === 'number' && isFinite(v) ? clamp(v, lo, hi) : null;
   if (typeof st.name === 'string') $('#projName').value = st.name.slice(0, 80);
   const snap = num(st.snap, 0, 1); if (snap !== null) { S.snap = snap; $('#snapSel').value = String(snap); }
@@ -1992,7 +2380,10 @@ if (GUEST_FRAMED) {
   refreshMixer(); refreshMap();
   try { const saved = localStorage.getItem('tld-tab'); if (saved === 'mixer') showTab('mixer'); } catch (e) {}
   requestAnimationFrame(frame);
-  try { await loadDemo(); } catch (e) { $('#demoNote').hidden = true; }
+  await refreshSceneList();
+  let start = 'b:studio';
+  try { const last = localStorage.getItem('tld-scene'); if (last && (last.startsWith('b:') ? SCENES[last.slice(2)] : savedScenes.some(m => 'u:' + m.id === last))) start = last; } catch (e) {}
+  if (!(await loadScene(start, { announce: false })) && start !== 'b:studio') await loadScene('b:studio', { announce: false });
   guestBooted();
   if (window.claude) $('#viewerNote').hidden = false;
 })();
