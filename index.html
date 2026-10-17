@@ -195,6 +195,28 @@ body.learning [data-ctl]{outline:1px dashed var(--amber);outline-offset:2px}
 .is-target{outline:2px solid var(--amber)!important;outline-offset:2px;animation:pulse 1s infinite}
 @keyframes pulse{50%{outline-color:transparent}}
 
+.matrix{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px 14px;display:grid;gap:12px}
+.mx-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.mx-head h2{font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:.05em;text-transform:uppercase;margin:0}
+.mx-head .tape-meta{flex:1 1 300px;min-width:0}
+.mx-head .ms{grid-template-columns:auto}
+.mx-head .ms button{padding:6px 12px}
+.mxscroll{overflow-x:auto;padding-bottom:4px}
+.mxgrid{display:grid;gap:4px;width:max-content;align-items:stretch}
+.mx-corner{display:flex;flex-direction:column;justify-content:flex-end;gap:2px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 6px}
+.mx-corner span:last-child{text-align:right}
+.mx-col{display:grid;justify-items:center;gap:4px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:6px 4px}
+.mx-name,.mx-row{font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.03em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.mx-row{display:flex;align-items:center;padding:0 8px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;max-width:150px}
+.mxbar{width:72px;height:5px;background:var(--well);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.mxbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--teal) 60%,var(--warn) 85%,var(--alert))}
+.mxcell{display:grid;place-items:center;border:1px solid var(--line);border-radius:5px;padding:6px 2px;background:var(--well)}
+.mxcell.self{border-style:dashed;border-color:var(--teal)}
+.mxcell.live{background:color-mix(in srgb,var(--oxide-hi) 14%,var(--well));border-color:var(--oxide-hi)}
+.mxcell.self.live{background:color-mix(in srgb,var(--teal) 16%,var(--well));border-color:var(--teal)}
+.mxcell .nm{display:none}
+.mxcell .knob .arc{stroke:var(--oxide-hi)}
+.mxcell.self .knob .arc{stroke:var(--teal)}
 details.map{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 14px}
 details.map summary{cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:.05em}
 .maptable-wrap{overflow-x:auto;margin-top:10px}
@@ -279,6 +301,15 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
     </div>
     <div class="learnbar" id="learnbar"><span id="learnText">Click a knob, fader or button, then move a control on your MIDI device.</span><button class="btn small" id="learnDone">Done</button></div>
     <div class="console"><div class="strips" id="strips"></div></div>
+    <section class="matrix" aria-labelledby="mxTitle">
+      <div class="mx-head">
+        <h2 id="mxTitle">Matrix</h2>
+        <span class="tape-meta">Send any channel into any other, or back into itself. Sends leave after the fader and enter the destination ahead of its gain, EQ and effects, so feedback runs through the whole strip. Each return has its own delay, and a soft limiter keeps runaway loops from clipping.</span>
+        <div id="mxMaster" style="display:flex;align-items:flex-end;gap:14px"></div>
+        <button class="btn small" id="mxClear">Clear all sends</button>
+      </div>
+      <div class="mxscroll"><div class="mxgrid" id="mxGrid"></div></div>
+    </section>
     <details class="map" id="mapDetails">
       <summary>MIDI map</summary>
       <p class="tape-meta">Each strip has its own MIDI channel. Picking a channel lays out a default set of CCs (Volume 7, Balance 10, Gain 20, High 21, Mid 22, Mid freq 23, Low 24, Drive 25, Echo 26, Echo time 27, Feedback 28, Reverb 29, Tape speed 30, Mute 31, Solo 32). Change any row here or use MIDI learn.</p>
@@ -339,7 +370,7 @@ readColors();
 /* ================= state ================= */
 const SR = 44100;
 const DEC = new OfflineAudioContext(2, 1, SR);
-const S = { tapes: [], master: { vol: 0 }, playing: false, t0: 0, midiMap: {}, nextId: 1, snap: 0.5, learn: false, learnTarget: null, tab: 'deck', demo: true };
+const S = { tapes: [], master: { vol: 0 }, playing: false, t0: 0, midiMap: {}, nextId: 1, snap: 0.5, learn: false, learnTarget: null, tab: 'deck', demo: true, mx: {}, mxOn: true, mxLvl: 0, mxNodes: null };
 
 const CH = {
   trim:     { label: 'Gain', short: 'Gain', min: -24, max: 24, dflt: 0, fmt: v => (v > 0 ? '+' : '') + v.toFixed(1) + 'dB' },
@@ -352,13 +383,14 @@ const CH = {
   echoTime: { label: 'Echo time', short: 'Time', min: 0.05, max: 2, dflt: 0.375, scale: 'log', fmt: v => Math.round(v * 1000) + 'ms' },
   echoFb:   { label: 'Echo feedback', short: 'Fdbk', min: 0, max: 0.9, dflt: 0.35, fmt: v => Math.round(v * 100) + '%' },
   verb:     { label: 'Reverb send', short: 'Verb', min: 0, max: 1, dflt: 0, fmt: v => Math.round(v * 100) + '%' },
+  mxDelay:  { label: 'Feedback delay', short: 'FB delay', min: 0.003, max: 2, dflt: 0.03, scale: 'log', fmt: v => Math.round(v * 1000) + 'ms' },
   speed:    { label: 'Tape speed', short: 'Speed', min: 0.25, max: 2, dflt: 1, scale: 'log', fmt: v => v.toFixed(2) + '×' },
   pan:      { label: 'Balance', short: 'Bal', min: -1, max: 1, dflt: 0, fmt: v => v < -0.005 ? 'L' + Math.round(-v * 100) : v > 0.005 ? 'R' + Math.round(v * 100) : 'C' },
   vol:      { label: 'Volume', short: 'Vol', min: -60, max: 6, dflt: 0, scale: 'fader', fmt: v => v <= -60 ? '−∞' : (v > 0 ? '+' : '') + v.toFixed(1) + ' dB' },
   mute:     { label: 'Mute', toggle: true },
   solo:     { label: 'Solo', toggle: true },
 };
-const DKIND = { trim: 'db', hi: 'db', mid: 'db', lo: 'db', midF: 'hz', drive: 'pct', echo: 'pct', echoFb: 'pct', verb: 'pct', echoTime: 'ms', speed: 'x', pan: 'pan', vol: 'vol' };
+const DKIND = { trim: 'db', hi: 'db', mid: 'db', lo: 'db', midF: 'hz', drive: 'pct', echo: 'pct', echoFb: 'pct', verb: 'pct', echoTime: 'ms', mxDelay: 'ms', speed: 'x', pan: 'pan', vol: 'vol' };
 for (const [k, d] of Object.entries(DKIND)) CH[k].d = d;
 const DEFAULT_CC = { vol: 7, pan: 10, trim: 20, hi: 21, mid: 22, midF: 23, lo: 24, drive: 25, echo: 26, echoTime: 27, echoFb: 28, verb: 29, speed: 30, mute: 31, solo: 32 };
 const defaultP = () => { const p = {}; for (const [k, s] of Object.entries(CH)) if (k !== 'speed') p[k] = s.toggle ? false : s.dflt; return p; };
@@ -404,10 +436,12 @@ function ensureAudio() {
   if (AC) return;
   AC = new (window.AudioContext || window.webkitAudioContext)();
   const g = AC.createGain(), an = AC.createAnalyser(); an.fftSize = 1024;
-  g.connect(an); an.connect(guestSpeakers(AC)); MASTER = { gain: g, an };
+  const safety = makeSafety(AC); g.connect(safety.input); safety.connect(an);
+  an.connect(guestSpeakers(AC)); MASTER = { gain: g, an };
   IMPULSE = makeImpulse(AC.sampleRate);
   applyMaster();
   S.tapes.forEach(attachChannel);
+  rewireMatrix();
   guestSyncAudio();
 }
 function buildChannel(ctx, dest, impulse) {
@@ -426,8 +460,45 @@ function buildChannel(ctx, dest, impulse) {
   n.shaper.connect(n.fader); n.fader.connect(n.pan); n.pan.connect(n.mute); n.mute.connect(dest);
   n.fader.connect(n.echoSend); n.echoSend.connect(n.delay); n.delay.connect(n.fbFilter); n.fbFilter.connect(n.fb); n.fb.connect(n.delay); n.fbFilter.connect(n.pan);
   n.fader.connect(n.verbSend); n.verbSend.connect(n.conv); n.conv.connect(n.verbRet); n.verbRet.connect(n.pan);
+  // matrix return: summed sends → delay (every feedback loop needs one) → soft limiter → into the strip ahead of its gain
+  n.mxIn = ctx.createGain(); n.mxDelay = ctx.createDelay(2.1); n.mxPre = ctx.createGain(); n.mxPre.gain.value = 0.25;
+  n.mxClip = ctx.createWaveShaper(); n.mxClip.curve = MX_CLIP; n.mxClip.oversample = '2x';
+  n.mxIn.connect(n.mxDelay); n.mxDelay.connect(n.mxPre); n.mxPre.connect(n.mxClip); n.mxClip.connect(n.trim);
   n._drive = -1;
   return n;
+}
+/* soft limiter for matrix returns: unity for small signals, saturates smoothly toward ±1 */
+const MX_CLIP = (() => { const N = 2049, c = new Float32Array(N); for (let i = 0; i < N; i++) { const u = i / (N - 1) * 2 - 1; c[i] = Math.tanh(u * 4); } return c; })();
+/* master safety clip: linear up to -2 dBFS, then a soft knee to a hard ceiling at 0 dBFS */
+const SAFETY_CURVE = (() => { const N = 4097, c = new Float32Array(N), K = 0.8, R = 0.2; for (let i = 0; i < N; i++) { const x = (i / (N - 1) * 2 - 1) * 2, a = Math.abs(x); c[i] = Math.sign(x) * (a <= K ? a : K + R * Math.tanh((a - K) / R)); } return c; })();
+function makeSafety(ctx) {
+  const pre = ctx.createGain(); pre.gain.value = 0.5;
+  const ws = ctx.createWaveShaper(); ws.curve = SAFETY_CURVE; ws.oversample = 'none';   // no oversampling: its filter would overshoot the ceiling
+  pre.connect(ws);
+  return { connect: d => ws.connect(d), input: pre, get _node() { return pre; } };
+}
+/* ---- matrix routing ---- */
+const mxKey = (a, b) => a + '>' + b;
+const mxId = (a, b) => 'x:' + mxKey(a, b);
+const mxGet = (a, b) => S.mx[mxKey(a, b)] ?? -60;
+function cellGain(a, b) { const v = mxGet(a, b); return S.mxOn && v > -60 ? db2g(v) * faderGain(S.mxLvl) : 0; }
+function wireMatrix(ctx, chans) {
+  const nodes = new Map();
+  for (const A of chans) for (const B of chans) {
+    const g = ctx.createGain(); g.gain.value = cellGain(A.t.id, B.t.id);
+    A.n.pan.connect(g); g.connect(B.n.mxIn);
+    nodes.set(mxKey(A.t.id, B.t.id), { g, from: A.n.pan });
+  }
+  return nodes;
+}
+function rewireMatrix() {
+  if (!AC) return;
+  if (S.mxNodes) for (const { g, from } of S.mxNodes.values()) { try { from.disconnect(g); } catch (e) {} try { g.disconnect(); } catch (e) {} }
+  S.mxNodes = wireMatrix(AC, S.tapes.filter(t => t.ch).map(t => ({ t, n: t.ch })));
+}
+function applyMatrix() {
+  if (AC && S.mxNodes) for (const [k, { g }] of S.mxNodes) { const [a, b] = k.split('>').map(Number); g.gain.setTargetAtTime(cellGain(a, b), AC.currentTime, 0.015); }
+  markLiveCells();
 }
 function driveCurve(d) {
   if (d < 0.005) return null;
@@ -445,15 +516,17 @@ function applyParams(n, t, ctx, solo, instant) {
   set(n.fader.gain, faderGain(p.vol)); set(n.pan.pan, p.pan);
   set(n.echoSend.gain, p.echo); set(n.delay.delayTime, p.echoTime); set(n.fb.gain, p.echoFb); set(n.verbSend.gain, p.verb);
   set(n.mute.gain, (!p.mute && (!solo || p.solo)) ? 1 : 0);
+  set(n.mxDelay.delayTime, p.mxDelay);
 }
 function attachChannel(t) {
   t.ch = buildChannel(AC, MASTER.gain, IMPULSE);
   t.ch.an = AC.createAnalyser(); t.ch.an.fftSize = 512; t.ch.mute.connect(t.ch.an);
+  t.ch.mxAn = AC.createAnalyser(); t.ch.mxAn.fftSize = 512; t.ch.mxClip.connect(t.ch.mxAn);
   applyParams(t.ch, t, AC, anySolo(), true);
 }
 function detachChannel(t) {
   if (!t.ch) return;
-  try { t.ch.mute.disconnect(); t.ch.fbFilter.disconnect(); t.ch.verbRet.disconnect(); t.ch.input.disconnect(); } catch (e) {}
+  for (const k of ['mute', 'fbFilter', 'verbRet', 'input', 'pan', 'mxClip', 'mxIn']) { try { t.ch[k].disconnect(); } catch (e) {} }
   t.ch = null;
 }
 function applyChannel(t) { if (AC && t.ch) applyParams(t.ch, t, AC, anySolo(), false); }
@@ -647,7 +720,7 @@ function createTape(o) {
   S.tapes.push(t);
   t.loopBuf = buildLoopBuffer(t); t.builtRev = t.reverse;
   buildCard(t);
-  if (AC) attachChannel(t);
+  if (AC) { attachChannel(t); rewireMatrix(); }
   if (S.playing && AC) startVoice(t, mod((AC.currentTime - S.t0) * t.speed, t.loopBuf.duration));
   if (!o.quiet) { refreshMixer(); refreshMap(); }
   return t;
@@ -655,8 +728,10 @@ function createTape(o) {
 function removeTape(t) {
   stopAudition(t); stopVoice(t); detachChannel(t);
   for (const k of Object.keys(CH)) { CTL.delete(`t${t.id}:${k}`); delete S.midiMap[`t${t.id}:${k}`]; }
+  for (const o of S.tapes) for (const id of [mxId(t.id, o.id), mxId(o.id, t.id)]) { CTL.delete(id); delete S.midiMap[id]; delete S.mx[id.slice(2)]; }
   S.tapes = S.tapes.filter(x => x !== t);
   if (t.ui) t.ui.card.remove();
+  rewireMatrix();
   if (t.p.solo) applyAll();
   renumber(); refreshMixer(); refreshMap();
   if (!S.tapes.length && S.playing) stop();
@@ -700,7 +775,7 @@ function buildCard(t) {
   ui.no = h('span', { class: 'tape-no' }, '00');
   ui.name = h('input', { class: 'tape-name', value: t.name, 'aria-label': 'Tape name', maxlength: 40 });
   ui.name.addEventListener('input', () => { t.name = ui.name.value || 'Tape'; if (ui.mixName) ui.mixName.textContent = t.name; });
-  ui.name.addEventListener('change', refreshMap);
+  ui.name.addEventListener('change', () => { refreshMap(); refreshMatrix(); });
   ui.meta = h('span', { class: 'tape-meta' });
   ui.reels = h('canvas', { class: 'reels', 'aria-hidden': 'true' });
   ui.strip = h('canvas');
@@ -1137,7 +1212,7 @@ function potEl(a, layout) {
 function ctlPot(id, layout, label) {
   const c = CTL.get(id);
   const p = potEl({ ctlId: id, name: ctlLabel(id), label: label || c.short || c.label, get: c.get, set: v => setCtl(id, v),
-    norm: v => norm(c, v), denorm: n => denorm(c, n), dflt: c.dflt, bip: c.min < 0 && c.max > 0,
+    norm: v => norm(c, v), denorm: n => denorm(c, n), dflt: c.dflt, bip: c.min < 0 && c.max > 0 && c.scale !== 'fader',
     disp: v => dispFor(c.d, v), parse: x => parseFor(c.d, x) }, layout);
   bindEl(id, p.el, p.render);
   return p.el;
@@ -1205,6 +1280,7 @@ function refreshMixer() {
     ctlPot('m:vol', 'bare')
   ));
   if (!S.tapes.length) box.prepend(h('div', { class: 'strip', style: 'width:220px;justify-content:center;color:var(--muted)' }, 'No tapes yet. Add sounds on the Deck tab and a channel strip appears here for each one.'));
+  refreshMatrix();
   refreshBadges();
 }
 function refreshStripChannels() { S.tapes.forEach(t => { if (t.ui.chSel) t.ui.chSel.value = t.midiCh; }); }
@@ -1297,7 +1373,10 @@ function refreshBadges() {
 }
 function refreshMap() {
   const body = $('#mapBody'); body.innerHTML = '';
-  const groups = [['Transport & master', ['m:play', 'm:vol']]];
+  ensureMxCtls();
+  const groups = [['Transport & master', ['m:play', 'm:vol', 'm:mxOn', 'm:mxLvl']]];
+  const cells = []; for (const a of S.tapes) for (const b of S.tapes) cells.push(mxId(a.id, b.id));
+  if (cells.length) groups.push(['Matrix sends', cells]);
   S.tapes.forEach((t, i) => groups.push([`Tape ${String(i + 1).padStart(2, '0')} · ${t.name}`, Object.keys(CH).map(k => `t${t.id}:${k}`)]));
   for (const [g, ids] of groups) {
     body.append(h('tr', { class: 'grp' }, h('td', { colspan: 5 }, g)));
@@ -1331,6 +1410,44 @@ defCtl('m:vol', { label: 'Master volume', short: 'Master', d: 'vol', min: -60, m
 defCtl('m:play', { label: 'Play / stop', toggle: true, get: () => S.playing, set: v => { if (guestHosted()) { syncCtl('m:play'); return; } if (v && !S.playing) play(); else if (!v && S.playing) stop(); } });
 S.midiMap['m:vol'] = { ch: 16, type: 'cc', num: 7 };
 S.midiMap['m:play'] = { ch: 16, type: 'cc', num: 20 };
+defCtl('m:mxOn', { label: 'Matrix on', toggle: true, get: () => S.mxOn, set: v => { S.mxOn = v; applyMatrix(); } });
+defCtl('m:mxLvl', { label: 'Matrix level', short: 'Level', min: -60, max: 6, dflt: 0, scale: 'fader', d: 'vol', fmt: CH.vol.fmt, get: () => S.mxLvl, set: v => { S.mxLvl = v; applyMatrix(); } });
+S.midiMap['m:mxOn'] = { ch: 16, type: 'cc', num: 21 };
+S.midiMap['m:mxLvl'] = { ch: 16, type: 'cc', num: 22 };
+function ensureMxCtls() {
+  for (const a of S.tapes) for (const b of S.tapes) {
+    const id = mxId(a.id, b.id); if (CTL.has(id)) continue;
+    defCtl(id, { min: -60, max: 6, dflt: -60, scale: 'fader', d: 'vol', fmt: CH.vol.fmt, short: 'Send',
+      group: () => 'Matrix', get: () => mxGet(a.id, b.id), set: v => { const k = mxKey(a.id, b.id); if (v <= -60) delete S.mx[k]; else S.mx[k] = v; applyMatrix(); } });
+    Object.defineProperty(CTL.get(id), 'label', { get: () => a === b ? `${a.name} → itself` : `${a.name} → ${b.name}` });
+  }
+}
+function markLiveCells() {
+  document.querySelectorAll('.mxcell').forEach(el => { const [a, b] = el.dataset.k.split('>').map(Number); el.classList.toggle('live', mxGet(a, b) > -60 && S.mxOn); });
+}
+function refreshMatrix() {
+  ensureMxCtls();
+  const box = $('#mxGrid'); box.innerHTML = '';
+  const N = S.tapes.length;
+  if (!N) { box.style.gridTemplateColumns = '1fr'; box.append(h('div', { class: 'tape-meta' }, 'Add tapes on the Deck tab and the matrix fills in, one row and one column per tape.')); return; }
+  box.style.gridTemplateColumns = `minmax(90px,150px) repeat(${N}, 96px)`;
+  box.append(h('div', { class: 'mx-corner' }, h('span', {}, 'To →'), h('span', {}, 'From ↓')));
+  for (const d of S.tapes) {
+    d.ui.mxBar = h('div', { class: 'mxbar', title: 'Level coming back into this channel from the matrix' }, h('i'));
+    box.append(h('div', { class: 'mx-col' }, h('div', { class: 'mx-name', title: d.name }, d.name), ctlPot(`t${d.id}:mxDelay`, 'col', 'FB delay'), d.ui.mxBar));
+  }
+  for (const a of S.tapes) {
+    box.append(h('div', { class: 'mx-row', title: a.name }, a.name));
+    for (const b of S.tapes) box.append(h('div', { class: 'mxcell' + (a === b ? ' self' : ''), 'data-k': mxKey(a.id, b.id), title: a === b ? `${a.name} fed back into itself` : `${a.name} sent into ${b.name}` }, ctlPot(mxId(a.id, b.id), 'col')));
+  }
+  markLiveCells(); refreshBadges();
+}
+function updateBar(el, an) {
+  if (!el) return;
+  let db = -90;
+  if (an) { const buf = updateBar.buf || (updateBar.buf = new Float32Array(512)); an.getFloatTimeDomainData(buf); let s2 = 0; for (let i = 0; i < 512; i++) s2 += buf[i] * buf[i]; db = 20 * Math.log10(Math.sqrt(s2 / 512) + 1e-9); }
+  el.firstChild.style.width = clamp((db + 54) / 54, 0, 1) * 100 + '%';
+}
 bindEl('m:play', $('#play'), () => {
   $('#play').setAttribute('aria-pressed', String(S.playing));
   $('#play').setAttribute('aria-label', S.playing ? 'Stop all tapes' : 'Play all tapes');
@@ -1397,13 +1514,15 @@ function buildMIDI(dur) {
 async function renderMix(dur) {
   const sr = AC ? AC.sampleRate : SR;
   const oc = new OfflineAudioContext(2, Math.ceil(dur * sr), sr);
-  const m = oc.createGain(); m.gain.value = faderGain(S.master.vol); m.connect(oc.destination);
-  const imp = makeImpulse(sr), solo = anySolo();
+  const m = oc.createGain(); m.gain.value = faderGain(S.master.vol);
+  const safety = makeSafety(oc); m.connect(safety.input); safety.connect(oc.destination);
+  const imp = makeImpulse(sr), solo = anySolo(), chans = [];
   for (const t of S.tapes) {
-    const n = buildChannel(oc, m, imp); applyParams(n, t, oc, solo, true);
+    const n = buildChannel(oc, m, imp); applyParams(n, t, oc, solo, true); chans.push({ t, n });
     const src = oc.createBufferSource(); src.buffer = t.loopBuf; src.loop = true; src.playbackRate.value = t.speed;
     src.connect(n.input); src.start(0, 0);
   }
+  wireMatrix(oc, chans);
   const out = await oc.startRendering();
   const fade = Math.min(out.length, Math.round(sr * 0.03));
   for (let c = 0; c < 2; c++) { const d = out.getChannelData(c); for (let i = 0; i < fade; i++) d[out.length - 1 - i] *= i / fade; }
@@ -1460,6 +1579,7 @@ async function saveProject() {
   }
   const proj = {
     app: 'tape-loop-deck', version: 1, name: $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
+    mxOn: S.mxOn, mxLvl: S.mxLvl, matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number); return [S.tapes.findIndex(t => t.id === a), S.tapes.findIndex(t => t.id === b), db]; }).filter(r => r[0] >= 0 && r[1] >= 0),
     tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve,
       audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } }))
   };
@@ -1475,6 +1595,7 @@ async function loadProject(file) {
   $('#projName').value = proj.name || 'tape-loops';
   S.snap = proj.snap ?? 0.5; $('#snapSel').value = String(S.snap);
   S.master = Object.assign({ vol: 0 }, proj.master); applyMaster(); syncCtl('m:vol');
+  S.mx = {}; S.mxOn = proj.mxOn !== false; S.mxLvl = typeof proj.mxLvl === 'number' ? clamp(proj.mxLvl, -60, 6) : 0;
   const made = [];
   for (const pt of proj.tapes) {
     try {
@@ -1483,11 +1604,15 @@ async function loadProject(file) {
         mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, trimIn: pt.trimIn, trimOut: pt.trimOut, fadeIn: pt.fadeIn, fadeOut: pt.fadeOut, fadeCurve: pt.fadeCurve, quiet: true }));
     } catch (e) { made.push(null); toast(`Couldn't decode the audio for ${pt.name}.`); }
   }
+  for (const r of Array.isArray(proj.matrix) ? proj.matrix : []) {
+    const [i, j, db] = r; if (made[i] && made[j] && typeof db === 'number' && db > -60) S.mx[mxKey(made[i].id, made[j].id)] = clamp(db, -60, 6);
+  }
+  syncCtl('m:mxOn'); syncCtl('m:mxLvl');
   for (const [k, m] of Object.entries(proj.midiMap || {})) {
     if (k.startsWith('#')) { const idx = +k.slice(1, k.indexOf(':')), key = k.split(':')[1]; if (made[idx]) S.midiMap[`t${made[idx].id}:${key}`] = m; }
     else S.midiMap[k] = m;
   }
-  renumber(); refreshMixer(); refreshMap(); closeSheet();
+  renumber(); refreshMixer(); refreshMap(); applyMatrix(); closeSheet();
   toast(`Opened ${proj.name || 'project'} with ${made.filter(Boolean).length} tapes.`);
 }
 async function doExport(fmt) {
@@ -1570,6 +1695,7 @@ function frame(now) {
   } else {
     for (const t of S.tapes) if (t.ui && t.ui.meter) updateMeter(t.ui.meter, S.playing && t.ch ? t.ch.an : null);
     updateMeter(MASTER_UI.meter, S.playing && MASTER ? MASTER.an : null);
+    for (const t of S.tapes) if (t.ui && t.ui.mxBar) updateBar(t.ui.mxBar, t.ch ? t.ch.mxAn : null);
   }
   $('#counter').textContent = fmtTime(S.playing && AC ? AC.currentTime - S.t0 : 0);
   requestAnimationFrame(frame);
@@ -1608,9 +1734,23 @@ async function loadDemo() {
   });
   createTape({ name: 'Two chords', clip: chords, mode: 'pad', tapeLen: 20, offset: 2, note: 60, demo: true, quiet: true, p: { vol: -3, verb: 0.35, echo: 0.12, echoTime: 0.6, hi: -2 } });
   createTape({ name: 'Bell figure', clip: bells, mode: 'loop', note: 76, demo: true, quiet: true, p: { vol: -7, echo: 0.32, echoTime: 0.43, echoFb: 0.42, verb: 0.3, pan: 0.35, drive: 0.15 } });
-  createTape({ name: 'Low drone', clip: drone, mode: 'pad', tapeLen: 13, offset: 1, note: 38, demo: true, quiet: true, p: { vol: -5, pan: -0.25, lo: 3, verb: 0.15 } });
-  renumber(); refreshMixer(); refreshMap();
+  const demoDrone = createTape({ name: 'Low drone', clip: drone, mode: 'pad', tapeLen: 13, offset: 1, note: 38, demo: true, quiet: true, p: { vol: -5, pan: -0.25, lo: 3, verb: 0.15, mxDelay: 0.12 } });
+  const demoBell = S.tapes.find(t => t.name === 'Bell figure');
+  if (demoBell) S.mx[mxKey(demoBell.id, demoDrone.id)] = -14;   // example route: bells ring on through the drone's channel
+  renumber(); refreshMixer(); refreshMap(); applyMatrix();
 }
+
+/* ================= matrix panel ================= */
+$('#mxMaster').append(h('div', { class: 'ms' }, toggleEl('m:mxOn', 'solo', 'Matrix on')), ctlPot('m:mxLvl', 'row', 'Matrix level'));
+(() => {
+  const b = $('#mxClear');
+  b.addEventListener('click', () => {
+    if (!Object.keys(S.mx).length) { toast('No matrix sends are set.'); return; }
+    if (b.dataset.armed) { S.mx = {}; applyMatrix(); for (const id of CTL.keys()) if (id.startsWith('x:')) syncCtl(id); delete b.dataset.armed; b.textContent = 'Clear all sends'; toast('Cleared all matrix sends.'); return; }
+    b.dataset.armed = '1'; b.textContent = 'Click again to clear';
+    setTimeout(() => { delete b.dataset.armed; b.textContent = 'Clear all sends'; }, 2500);
+  });
+})();
 
 /* ================= theme ================= */
 const lightQuery = matchMedia('(prefers-color-scheme: light)');
@@ -1717,6 +1857,8 @@ function guestCapture() {
   return {
     app: 'tape-loop-deck', version: 1, audioIncluded: false,
     name: $('#projName').value, snap: S.snap, master: { vol: S.master.vol },
+    mxOn: S.mxOn, mxLvl: S.mxLvl,
+    matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number), A = S.tapes.find(t => t.id === a), B = S.tapes.find(t => t.id === b); return A && B ? { from: A.name, to: B.name, db } : null; }).filter(Boolean),
     tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, p: Object.assign({}, t.p) }))
   };
 }
@@ -1727,6 +1869,18 @@ function guestApply(st) {
   if (typeof st.name === 'string') $('#projName').value = st.name.slice(0, 80);
   const snap = num(st.snap, 0, 1); if (snap !== null) { S.snap = snap; $('#snapSel').value = String(snap); }
   const mv = st.master && num(st.master.vol, -60, 6); if (mv !== null && mv !== undefined) { S.master.vol = mv; applyMaster(); syncCtl('m:vol'); }
+  if (typeof st.mxOn === 'boolean') { S.mxOn = st.mxOn; syncCtl('m:mxOn'); }
+  const ml = num(st.mxLvl, -60, 6); if (ml !== null) { S.mxLvl = ml; syncCtl('m:mxLvl'); }
+  if (Array.isArray(st.matrix)) {
+    S.mx = {};
+    for (const r of st.matrix) {
+      if (!r || typeof r !== 'object') continue;
+      const A = S.tapes.find(t => t.name === r.from), B = S.tapes.find(t => t.name === r.to), db = num(r.db, -60, 6);
+      if (A && B && db !== null && db > -60) S.mx[mxKey(A.id, B.id)] = db;
+    }
+    for (const id of CTL.keys()) if (id.startsWith('x:')) syncCtl(id);
+  }
+  applyMatrix();
   const used = new Set();
   let applied = 0, missing = 0;
   (Array.isArray(st.tapes) ? st.tapes : []).forEach(pt => {
