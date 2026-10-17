@@ -6,10 +6,27 @@ A virtual tape loop player that runs entirely in the browser (Web Audio API).
 - **Scenes:** built-in sets (Studio demo, Nature, Microhouse, Empty deck), all synthesized in the browser. Save your current set as a named scene and recall it later; saved scenes, audio included, are kept in your browser.
 - **Mixer:** a performance console with one strip per tape: gain, 3-band EQ with sweepable mid, an effects bus (tape drive, echo, reverb), tape speed, balance, volume fader, mute and solo.
 - **MIDI:** every major control is mappable. Each strip gets its own MIDI channel with a default CC layout, and MIDI learn remaps anything. Needs a browser with Web MIDI (Chrome, Edge, Opera).
+- **Capture:** record bar-exact clips straight from Logic Rhythm, Boolean Melody Machine, Choir and Pocket Grains running in other tabs. See [Capture from apps](#capture-from-apps).
 - **Save & export:** projects save as a .json file with the audio included. Export the mix as WAV or MP3, or a MIDI file with one track per tape.
 - Dark and light themes.
 
 Nothing is uploaded; all audio stays in your browser.
+
+## Capture from apps
+
+Tape Loop Deck can record clips straight from Logic Rhythm, Boolean Melody Machine, Choir and Pocket Grains.
+
+1. Open the deck and one or more of those apps in tabs or windows of the **same browser**.
+2. Press play in the app. In the deck's **Capture from** bar (under the scenes), pick the app and a length (1 to 16 bars).
+3. Press **Grab last N bars** to take the bars that have just played, or **Record next N bars** to record from the next bar line. While it records, the button turns into **Cancel**.
+
+Each clip arrives as a new tape that loops at exactly its length, cut on the app's own bar lines, so a 4-bar clip of a 120 bpm pattern is exactly 8.000 seconds and loops seamlessly. It is named after the app, its bar count and its tempo, and saves with the project like any other tape.
+
+- While the deck is open, each app keeps the last 48 seconds of its own sound, so you can grab after the fact. If the app has only just started, Grab gives you the full bars it has so far and says so.
+- Clips are recorded from each app's own output, before the speakers, so other tabs' sound never leaks in.
+- It works between tabs of one browser on one computer, not across computers.
+
+How it works: the shared `jam-clips.js` module (embedded in every app between `JAM-CLIPS` markers) talks over a BroadcastChannel. The apps record through an AudioWorklet that counts audio frames, and the bar lines come from each app's own clock in the same frames, which is why clips are sample-exact.
 
 ## Discobot guest
 
