@@ -78,6 +78,34 @@ main{max-width:1400px;margin:0 auto;padding-block:18px 48px;padding-inline:16px}
 .scenerow select{min-width:170px;padding:6px 8px;font-size:15px}
 .scenerow input{background:var(--well);border:1px solid var(--line);border-radius:4px;padding:6px 8px;width:190px;max-width:100%}
 .scene-desc{color:var(--muted);font-size:14px;min-height:1.3em}
+/* patterns: pads A–H, a grid, a chain of steps */
+.patbar .pads{display:grid;grid-template-columns:repeat(8,minmax(46px,1fr));gap:6px;flex:1 1 420px;max-width:620px}
+.pat{position:relative;background:var(--panel-2);border:1px solid var(--line);border-bottom-width:3px;border-radius:5px;padding:7px 8px 5px;text-align:left;cursor:pointer;min-height:48px;display:flex;flex-direction:column;justify-content:space-between;gap:2px}
+.pat:active{transform:translateY(1px);border-bottom-width:2px}
+.pat b{font-family:var(--display);font-weight:800;font-size:20px;line-height:1;letter-spacing:.04em}
+.pat small{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pat .led{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--line)}
+.pat.empty b{color:var(--muted)}
+.pat.cur{border-color:color-mix(in srgb,var(--amber) 60%,var(--line))}
+.pat.cur .led{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.pat.queued .led{background:var(--teal);box-shadow:0 0 6px var(--teal);animation:blink .5s steps(2) infinite}
+.patbar.storing .pat{border-style:dashed;border-color:var(--teal)}
+.patbar.clearing .pat:not(.empty){border-style:dashed;border-color:var(--alert)}
+.patbar .num-in{width:64px;background:var(--well);border:1px solid var(--line);border-radius:4px;padding:5px 6px;font-family:var(--mono);font-size:13px}
+.pair{display:inline-flex;align-items:center;gap:8px}
+.patbar .pair select,.step select.sel{min-width:0}
+.chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.step{display:inline-flex;align-items:center;gap:4px;background:var(--well);border:1px solid var(--line);border-radius:5px;padding:3px 4px 3px 8px}
+.step.on{border-color:var(--amber);box-shadow:inset 0 -2px 0 var(--amber)}
+.step .sel{padding:3px 4px}
+.step .num-in{width:52px;padding:3px 4px}
+.step .x{background:none;border:0;color:var(--muted);cursor:pointer;padding:2px 6px;font-size:15px}
+.step .x:hover{color:var(--alert)}
+.step .unit{font-size:12px;color:var(--muted)}
+.patpos{font-family:var(--mono);font-size:13px;color:var(--amber);background:var(--well);border:1px solid var(--line);border-radius:4px;padding:4px 8px;min-width:12ch;text-align:center}
+.linked{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal);border:1px solid var(--teal);border-radius:10px;padding:1px 8px}
+@keyframes blink{50%{opacity:.25}}
+@media (max-width:640px){.patbar .pads{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .capbar .scenerow select#capBars{min-width:0}
 .capbar .led{flex:none}
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-bottom:14px}
@@ -255,7 +283,7 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
   .brand h1{font-size:22px}
   .tape-acts{margin-left:0}
 }
-@media (prefers-reduced-motion:reduce){.is-target{animation:none}}
+@media (prefers-reduced-motion:reduce){.is-target,.pat.queued .led{animation:none}}
 </style>
 
 <header class="top">
@@ -291,6 +319,36 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
         <button class="btn" id="sceneSave">Save scene</button>
       </div>
       <div class="scene-desc" id="sceneDesc" aria-live="polite"></div>
+    </div>
+    <div class="scenebar patbar" id="patBar" aria-label="Patterns">
+      <div class="scenerow">
+        <span class="lbl">Patterns</span>
+        <div class="pads" id="patPads"></div>
+        <span class="grow"></span>
+        <button class="btn small" id="patStore" aria-pressed="false" title="Then tap a pad to store which tapes play, and their levels">Store</button>
+        <button class="btn small" id="patClear" aria-pressed="false" title="Then tap a pad to empty it">Clear</button>
+      </div>
+      <div class="scenerow">
+        <span class="lbl">Grid</span>
+        <div class="seg" id="patUnit"><button data-v="bar" aria-pressed="true">Bars</button><button data-v="sec" aria-pressed="false">Seconds</button></div>
+        <label class="lbl" for="patBpm" data-bars>BPM</label>
+        <input type="number" class="num-in" id="patBpm" min="20" max="300" step="0.1" value="120" data-bars>
+        <label class="lbl" for="patBpb" data-bars>Beats/bar</label>
+        <input type="number" class="num-in" id="patBpb" min="1" max="16" step="1" value="4" data-bars>
+        <button class="btn small" id="patGuess" data-bars title="Set the tempo so the longest tape is a whole number of bars">From tapes</button>
+        <span class="patpos" id="patPos" aria-label="Grid position">—</span>
+        <span class="grow"></span>
+        <span class="pair"><label class="lbl" for="patQuant">Switch</label> <select class="sel" id="patQuant"></select></span>
+        <span class="pair"><label class="lbl" for="patFade">Fade</label> <select class="sel" id="patFade"></select></span>
+      </div>
+      <div class="scenerow">
+        <button class="tog" id="patChainOn" aria-pressed="false" data-ctl="p:chain">Chain</button>
+        <div class="chain" id="patChain"></div>
+        <button class="btn small" id="patAddStep">+ Step</button>
+        <span class="grow"></span>
+        <span class="pair"><label class="lbl" for="patEnd">At the end</label> <select class="sel" id="patEnd"><option value="loop">Loop the chain</option><option value="hold">Stay on the last</option></select></span>
+      </div>
+      <div class="scene-desc" id="patDesc" aria-live="polite"></div>
     </div>
     <div class="scenebar capbar" id="capBar" aria-label="Capture from other apps">
       <div class="scenerow">
@@ -977,10 +1035,161 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
                       KEEP_SEC: KEEP_SEC, MAX_BARS: MAX_BARS };
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
+<script id="deck-link">
+/* ===== DECK LINK — Tape Loop Deck shares its tapes with other apps in the ecosystem =====
+   One identical copy of this block is embedded in each app that uses it (between the DECK-LINK
+   markers); deck-link.js is the source copy. Same browser, same origin, any number of tabs.
+
+   Tape Loop Deck is the *deck*. Any app can be a *taker* (Axis Stack is the first): it lists the
+   tapes on every open deck, picks one, gets that tape's loop audio once, and plays its own copy
+   locked to the deck — so the copy can go through the taker's effects while the deck plays on.
+
+   Time is the shared wall clock in ms: performance.timeOrigin + performance.now(), meaning the
+   moment a sound is *heard*. Each app maps it to its own AudioContext with getOutputTimestamp(),
+   so two tabs on one computer line up to within a few milliseconds.
+
+   Deck:
+     const dl = DeckLink.deck({
+       title: 'Tape Loop Deck',
+       tapes: () => [ { id, name, ver, len, speed, playing, anchorWall, anchorPhase, on, onAt, fadeMs } ],
+       audio: id => ({ ver, sampleRate, left, right }) | null,   // the tape's whole loop, as heard
+       onTakers: map => {}                                        // { tapeId: ['Axis Stack', ...] }
+     });
+     dl.changed()     // tapes, timing or on/off changed: tell takers now (it also repeats every second)
+
+     Per tape: len is the loop's length in seconds of audio, speed its playback rate; the loop is at
+     anchorPhase seconds (of audio) at wall time anchorWall, and runs on at speed. ver changes
+     whenever the audio itself changes. on is whether the deck is sounding it (mute, solo, patterns);
+     onAt is the wall time that state takes effect (it may be just ahead), fadeMs how long it ramps.
+
+   Taker:
+     const tk = DeckLink.taker({ app: 'axis', title: 'Axis Stack',
+       onDecks: decks => {},           // [{ id, title, tapes: [...] }] whenever anything changes
+       onAudio: msg => {} });          // { deck, tape, ver, sampleRate, left, right }
+     tk.use(deckId, tapeId)            // or tk.use(null): which tape this app is playing
+     tk.fetch(deckId, tapeId, ver)     // ask for a tape's audio (answered by onAudio)
+     tk.phaseAt(tape, wall)            // where a tape's loop is (seconds of audio) at wall time
+
+   Messages: { dv:1, from, kind, ... } on channel CHANNEL.
+     deck  -> all   deck    { title, tapes }                 heartbeat and on every change
+     taker -> all   taker   { title, uses: { deckId, tapeId } | null }   heartbeat
+     taker -> deck  want    { to, tape, ver, reqId }
+     deck  -> taker audio   { to, reqId, tape, ver, sampleRate, left, right }
+     either -> all  bye */
+(function(global){
+  'use strict';
+  if(global.DeckLink) return;
+  var CHANNEL = 'aaronvandorn-deck-v1', DV = 1;
+  var HB_MS = 1000, TTL_MS = 4000;
+  function rid(){ return Math.random().toString(36).slice(2, 10); }
+  function wallNow(){ return performance.timeOrigin + performance.now(); }
+  function fin(v, lo, hi){ return typeof v === 'number' && isFinite(v) && v >= lo && v <= hi; }
+  function open(onMsg){
+    if(typeof BroadcastChannel === 'undefined') return null;
+    var ch = new BroadcastChannel(CHANNEL);
+    ch.onmessage = function(e){ var m = e.data; if(m && m.dv === DV && typeof m.kind === 'string' && typeof m.from === 'string') onMsg(m); };
+    return ch;
+  }
+  function cleanTape(t){
+    if(!t || (typeof t.id !== 'string' && typeof t.id !== 'number')) return null;
+    if(!fin(t.len, 0.001, 36000) || !fin(t.speed, 0.01, 100)) return null;
+    return {
+      id: String(t.id).slice(0, 40), name: String(t.name || 'Tape').slice(0, 60), ver: String(t.ver == null ? '' : t.ver).slice(0, 40),
+      len: t.len, speed: t.speed, playing: !!t.playing,
+      anchorWall: fin(t.anchorWall, 0, Infinity) ? t.anchorWall : 0, anchorPhase: fin(t.anchorPhase, 0, 36000) ? t.anchorPhase : 0,
+      on: t.on !== false, onAt: fin(t.onAt, 0, Infinity) ? t.onAt : 0, fadeMs: fin(t.fadeMs, 0, 60000) ? t.fadeMs : 0
+    };
+  }
+  function phaseAt(t, wall){
+    if(!t || !t.playing) return 0;
+    var p = (t.anchorPhase + (wall - t.anchorWall) / 1000 * t.speed) % t.len;
+    return p < 0 ? p + t.len : p;
+  }
+
+  function deck(o){
+    var id = rid(), ch = null, takers = {}, hb = 0, lastTakers = '';
+    function post(m){ if(!ch) return; m.dv = DV; m.from = id; try{ ch.postMessage(m); }catch(e){} }
+    function tapes(){ var a = []; try{ a = o.tapes() || []; }catch(e){} return a.map(cleanTape).filter(Boolean); }
+    function changed(){ if(ch) post({ kind:'deck', title: o.title || 'Tape Loop Deck', tapes: tapes() }); }
+    function sweep(){
+      var now = Date.now(), map = {};
+      Object.keys(takers).forEach(function(k){
+        var t = takers[k];
+        if(now - t.seen > TTL_MS){ delete takers[k]; return; }
+        if(t.uses && t.uses.deckId === id){ (map[t.uses.tapeId] = map[t.uses.tapeId] || []).push(t.title); }
+      });
+      var sig = JSON.stringify(map);
+      if(sig !== lastTakers){ lastTakers = sig; try{ o.onTakers && o.onTakers(map); }catch(e){} }
+    }
+    function onMsg(m){
+      if(m.kind === 'taker'){
+        var u = m.uses && typeof m.uses === 'object' ? { deckId: String(m.uses.deckId), tapeId: String(m.uses.tapeId) } : null;
+        var fresh = !takers[m.from];
+        takers[m.from] = { title: String(m.title || 'An app').slice(0, 40), uses: u, seen: Date.now() };
+        sweep();
+        if(fresh) changed();
+      } else if(m.kind === 'bye'){ if(takers[m.from]){ delete takers[m.from]; sweep(); } }
+      else if(m.kind === 'want' && m.to === id){
+        var a = null; try{ a = o.audio(String(m.tape)); }catch(e){}
+        if(!a || !a.left) return;
+        post({ kind:'audio', to: m.from, reqId: m.reqId, tape: String(m.tape), ver: String(a.ver), sampleRate: a.sampleRate, left: a.left, right: a.right || a.left });
+      }
+    }
+    ch = open(onMsg);
+    if(ch){
+      hb = setInterval(function(){ changed(); sweep(); }, HB_MS);
+      setTimeout(changed, 50);
+      addEventListener('pagehide', function(){ post({ kind:'bye' }); });
+    }
+    return { id: id, changed: changed, active: !!ch, takers: function(){ return takers; } };
+  }
+
+  function taker(o){
+    var id = rid(), ch = null, decks = {}, uses = null, sig = '';
+    function post(m){ if(!ch) return; m.dv = DV; m.from = id; try{ ch.postMessage(m); }catch(e){} }
+    function hello(){ post({ kind:'taker', title: o.title || o.app || 'App', uses: uses }); }
+    function list(){
+      var now = Date.now();
+      return Object.keys(decks).filter(function(k){ return now - decks[k].seen <= TTL_MS; })
+        .map(function(k){ return { id: k, title: decks[k].title, tapes: decks[k].tapes }; });
+    }
+    function emit(force){
+      var l = list(), s = JSON.stringify(l);
+      if(force || s !== sig){ sig = s; try{ o.onDecks && o.onDecks(l); }catch(e){} }
+    }
+    function onMsg(m){
+      if(m.kind === 'deck'){
+        var ts = Array.isArray(m.tapes) ? m.tapes.slice(0, 256).map(cleanTape).filter(Boolean) : [];
+        decks[m.from] = { title: String(m.title || 'Tape Loop Deck').slice(0, 40), tapes: ts, seen: Date.now() };
+        emit();
+      } else if(m.kind === 'bye'){ if(decks[m.from]){ delete decks[m.from]; emit(); } }
+      else if(m.kind === 'audio' && m.to === id){
+        if(!(m.left instanceof Float32Array) || !fin(m.sampleRate, 3000, 768000)) return;
+        var right = m.right instanceof Float32Array && m.right.length === m.left.length ? m.right : m.left;
+        try{ o.onAudio && o.onAudio({ deck: m.from, tape: String(m.tape), ver: String(m.ver), sampleRate: m.sampleRate, left: m.left, right: right }); }catch(e){}
+      }
+    }
+    ch = open(onMsg);
+    if(ch){
+      setInterval(function(){ hello(); emit(); }, HB_MS);
+      hello();
+      addEventListener('pagehide', function(){ post({ kind:'bye' }); });
+    }
+    return {
+      id: id, active: !!ch, decks: list, phaseAt: phaseAt, wallNow: wallNow,
+      use: function(deckId, tapeId){ var u = deckId && tapeId != null ? { deckId: String(deckId), tapeId: String(tapeId) } : null; if(JSON.stringify(u) !== JSON.stringify(uses)){ uses = u; hello(); } },
+      fetch: function(deckId, tapeId, ver){ post({ kind:'want', to: deckId, tape: String(tapeId), ver: String(ver || ''), reqId: rid() }); }
+    };
+  }
+
+  global.DeckLink = { deck: deck, taker: taker, phaseAt: phaseAt, wallNow: wallNow, CHANNEL: CHANNEL };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
 <script>
 'use strict';
 /* ================= helpers ================= */
 const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -1152,8 +1361,10 @@ function applyParams(n, t, ctx, solo, instant) {
   if (n._drive !== p.drive) { n.shaper.curve = driveCurve(p.drive); n._drive = p.drive; }
   set(n.fader.gain, faderGain(p.vol)); set(n.pan.pan, p.pan);
   set(n.echoSend.gain, p.echo); set(n.delay.delayTime, p.echoTime); set(n.fb.gain, p.echoFb); set(n.verbSend.gain, p.verb);
-  set(n.mute.gain, (!p.mute && (!solo || p.solo)) ? 1 : 0);
+  const on = !p.mute && (!solo || p.solo);
+  set(n.mute.gain, on ? 1 : 0);
   set(n.mxDelay.delayTime, p.mxDelay);
+  if (ctx === AC && (!t._gateAhead || ctx.currentTime >= t._gateAhead)) linkGate(t, on, now, instant ? 0 : 0.036);
 }
 function attachChannel(t) {
   t.ch = buildChannel(AC, MASTER.gain, IMPULSE);
@@ -1215,15 +1426,17 @@ function setSpeed(t, v) {
   if (S.playing && t.voice) { const ph = phaseNow(t); t.anchorPhase = ph; t.anchorCtx = AC.currentTime; t.voice.src.playbackRate.setValueAtTime(v, AC.currentTime); }
   t.speed = v;
   if (t.ui) updateCardFields(t);
+  linkChanged();
 }
 function rebuild(t) {
   const playing = S.playing && t.voice;
   const ph = playing ? phaseNow(t) : 0;
   const oldLen = t.loopBuf ? t.loopBuf.duration : 0, oldRev = t.builtRev;
   if (t._clipDirty) { t.clip = makeClip(t); t._clipDirty = false; if (t.offset >= t.tapeLen) t.offset = 0; }
-  t.loopBuf = buildLoopBuffer(t); t.builtRev = t.reverse;
+  t.loopBuf = buildLoopBuffer(t); t.builtRev = t.reverse; t.ver++;
   if (playing) { let p = ph; if (oldRev !== t.reverse) p = oldLen - ph; startVoice(t, mod(p, t.loopBuf.duration)); }
   if (t.ui) { drawStripStatic(t); updateCardFields(t); }
+  linkChanged();
 }
 function scheduleRebuild(t) { if (t._rb) return; t._rb = requestAnimationFrame(() => { t._rb = 0; rebuild(t); }); }
 
@@ -1243,8 +1456,10 @@ async function play(startWall) {
   S.playing = true; S.t0 = at - late;
   S.tapes.forEach(t => startVoice(t, late * t.speed, at));
   syncCtl('m:play');
+  patOnPlay(at - late);
+  linkChanged();
 }
-function stop() { S.playing = false; S.tapes.forEach(stopVoice); syncCtl('m:play'); }
+function stop() { S.playing = false; S.tapes.forEach(stopVoice); syncCtl('m:play'); patOnStop(); linkChanged(); }
 function togglePlay() { if (guestHosted()) return; S.playing ? stop() : play(); } // in a Discobot rack, Discobot starts and stops
 
 /* ================= tapes ================= */
@@ -1343,7 +1558,8 @@ function createTape(o) {
     id: S.nextId++, name: o.name || 'Tape', clip: o.clip, srcBytes: o.srcBytes || null, srcType: o.srcType || '', srcName: o.srcName || '',
     mode: o.mode || 'loop', tapeLen: o.tapeLen || Math.max(1, Math.round(o.clip.duration * 2 * 10) / 10), offset: o.offset || 0,
     speed: o.speed || 1, reverse: !!o.reverse, note: o.note != null ? o.note : 60 + (S.tapes.length * 2) % 24,
-    midiCh: 0, p: Object.assign(defaultP(), o.p || {}), demo: !!o.demo, voice: null, ch: null, anchorCtx: 0, anchorPhase: 0, reelA: [0, 0]
+    midiCh: 0, p: Object.assign(defaultP(), o.p || {}), demo: !!o.demo, voice: null, ch: null, anchorCtx: 0, anchorPhase: 0, reelA: [0, 0],
+    ver: 1, gate: { on: true, at: 0, fade: 0 }
   };
   t.src = o.clip;
   t.trimIn = clamp(o.trimIn || 0, 0, o.clip.duration);
@@ -1360,6 +1576,7 @@ function createTape(o) {
   if (AC) { attachChannel(t); rewireMatrix(); }
   if (S.playing && AC) startVoice(t, mod((AC.currentTime - S.t0) * t.speed, t.loopBuf.duration));
   if (!o.quiet) { refreshMixer(); refreshMap(); }
+  linkChanged();
   return t;
 }
 function removeTape(t) {
@@ -1372,6 +1589,7 @@ function removeTape(t) {
   if (t.p.solo) applyAll();
   renumber(); refreshMixer(); refreshMap();
   if (!S.tapes.length && S.playing) stop();
+  patRender(); linkChanged();
 }
 function renumber() { S.tapes.forEach((t, i) => { if (t.ui) t.ui.no.textContent = String(i + 1).padStart(2, '0'); }); }
 function duplicateTape(t) {
@@ -1414,6 +1632,7 @@ function buildCard(t) {
   ui.name.addEventListener('input', () => { t.name = ui.name.value || 'Tape'; if (ui.mixName) ui.mixName.textContent = t.name; });
   ui.name.addEventListener('change', () => { refreshMap(); refreshMatrix(); });
   ui.meta = h('span', { class: 'tape-meta' });
+  ui.linked = h('span', { class: 'linked', hidden: true, title: 'Another app is playing a copy of this tape, in time with the deck' });
   ui.reels = h('canvas', { class: 'reels', 'aria-hidden': 'true' });
   ui.strip = h('canvas');
   ui.head = h('div', { class: 'playhead' });
@@ -1439,7 +1658,7 @@ function buildCard(t) {
 
   buildTrim(t);
   ui.card = h('article', { class: 'tape' },
-    h('div', { class: 'tape-head' }, ui.no, ui.name, ui.meta,
+    h('div', { class: 'tape-head' }, ui.no, ui.name, ui.meta, ui.linked,
       h('div', { class: 'tape-acts' },
         ui.trimBtn, h('button', { class: 'btn small', onclick: () => fileIn.click() }, 'Replace sound'),
         h('button', { class: 'btn small', onclick: () => duplicateTape(t) }, 'Duplicate'), rmBtn, fileIn)),
@@ -2012,6 +2231,7 @@ function refreshMap() {
   const body = $('#mapBody'); body.innerHTML = '';
   ensureMxCtls();
   const groups = [['Transport & master', ['m:play', 'm:vol', 'm:mxOn', 'm:mxLvl']]];
+  groups.push(['Patterns', ['p:chain', ...Array.from({ length: PAT_N }, (_, i) => `p:${i}`)]]);
   const cells = []; for (const a of S.tapes) for (const b of S.tapes) cells.push(mxId(a.id, b.id));
   if (cells.length) groups.push(['Matrix sends', cells]);
   S.tapes.forEach((t, i) => groups.push([`Tape ${String(i + 1).padStart(2, '0')} · ${t.name}`, Object.keys(CH).map(k => `t${t.id}:${k}`)]));
@@ -2218,7 +2438,8 @@ function serializeProject(name) {
     app: 'tape-loop-deck', version: 1, name: name || $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
     mxOn: S.mxOn, mxLvl: S.mxLvl, matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number); return [S.tapes.findIndex(t => t.id === a), S.tapes.findIndex(t => t.id === b), db]; }).filter(r => r[0] >= 0 && r[1] >= 0),
     tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve,
-      audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } }))
+      audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } })),
+    patterns: patSerialize()
   };
   return proj;
 }
@@ -2235,7 +2456,7 @@ async function loadProject(file) {
 async function applyProject(proj, { announce = true } = {}) {
   stop();
   [...S.tapes].forEach(removeTape);
-  const keepMaster = Object.fromEntries(Object.entries(S.midiMap).filter(([k]) => k.startsWith('m:')));
+  const keepMaster = Object.fromEntries(Object.entries(S.midiMap).filter(([k]) => k.startsWith('m:') || k.startsWith('p:')));
   S.midiMap = keepMaster;
   $('#projName').value = proj.name || 'tape-loops';
   S.snap = proj.snap ?? 0.5; $('#snapSel').value = String(S.snap);
@@ -2257,6 +2478,7 @@ async function applyProject(proj, { announce = true } = {}) {
     if (k.startsWith('#')) { const idx = +k.slice(1, k.indexOf(':')), key = k.split(':')[1]; if (made[idx]) S.midiMap[`t${made[idx].id}:${key}`] = m; }
     else S.midiMap[k] = m;
   }
+  patLoad(proj.patterns, made);
   renumber(); refreshMixer(); refreshMap(); applyMatrix();
   if (announce) toast(`Opened ${proj.name || 'project'} with ${made.filter(Boolean).length} tapes.`);
 }
@@ -2342,6 +2564,7 @@ function frame(now) {
     for (const t of S.tapes) if (t.ui && t.ui.mxBar) updateBar(t.ui.mxBar, t.ch ? t.ch.mxAn : null);
   }
   $('#counter').textContent = fmtTime(S.playing && AC ? AC.currentTime - S.t0 : 0);
+  patFrame();
   requestAnimationFrame(frame);
 }
 
@@ -2607,7 +2830,16 @@ async function buildMicro() {
       { name: 'Blips', clip: blips, mode: 'loop', note: 81, p: { vol: -11, pan: 0.3, echo: 0.35, echoTime: dot8, echoFb: 0.45, verb: 0.3 } },
       { name: 'Drone', clip: drone, mode: 'loop', note: 45, p: { vol: -8, lo: 2, verb: 0.4, mxDelay: MH_16 } }
     ],
-    mx: [[1, 5, -15], [4, 3, -14]]   // clicks excite the drone on a 16th-note delay; blips feed the whirr
+    mx: [[1, 5, -15], [4, 3, -14]],   // clicks excite the drone on a 16th-note delay; blips feed the whirr
+    // patterns by tape index: 0 kick, 1 clicks, 2 crackle, 3 whirr, 4 blips, 5 drone
+    patterns: { v: 1, unit: 'bar', bpm: 124, bpb: 4, quant: 1, fade: 0, end: 'loop', chainOn: true,
+      pads: [
+        { name: 'Intro', t: [[2, 1], [5, 1]] },
+        { name: 'Groove', t: [[0, 1], [1, 1], [2, 1], [5, 1]] },
+        { name: 'Full', t: [[0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [5, 1]] },
+        { name: 'Break', t: [[2, 1], [3, 1], [4, 1], [5, 1]] }
+      ].map(pd => ({ name: pd.name, t: [0, 1, 2, 3, 4, 5].map(i => [i, pd.t.some(x => x[0] === i) ? 1 : 0, null]) })),
+      chain: [[0, 4], [1, 8], [2, 8], [3, 4], [2, 8]] }
   };
 }
 const SCENES = {
@@ -2655,6 +2887,7 @@ async function loadScene(key, { announce = true } = {}) {
       clearDeck();
       const made = data.tapes.map(sp => createTape(Object.assign({}, sp, { p: Object.assign({}, sp.p), quiet: true })));
       for (const [i, j, db] of data.mx) if (made[i] && made[j]) S.mx[mxKey(made[i].id, made[j].id)] = db;
+      patLoad(data.patterns, made);
       $('#projName').value = sc.file;
       renumber(); refreshMixer(); refreshMap(); applyMatrix();
       if (announce) toast(made.length ? `Loaded ${sc.name}: ${made.length} tapes.` : 'Cleared the deck.');
@@ -3088,6 +3321,314 @@ $('#capLast').addEventListener('click', () => capRequest('last'));
 $('#capNext').addEventListener('click', () => { if (CAP.pending && CAP.pending.mode === 'next') capCancel(); else capRequest('next'); });
 CAP.rx = window.JamClips ? JamClips.receiver({ onSources: capRefresh, onStatus: capStatus, onClip: capClip }) : null;
 if (CAP.rx) capSay(CAP_IDLE); else { $('#capBar').hidden = true; }
+
+/* ================= patterns & transitions =================
+   A pattern is a snapshot of this deck: which tapes play and at what level. Pads A–H hold eight.
+   Tap a pad and the deck switches to it on the next grid line (Switch), or the chain steps through
+   patterns after set counts of bars or seconds. Each switch is put on the audio clock a little
+   ahead, so it lands exactly on the line; Fade ramps the levels over that length instead of cutting.
+   The grid starts at the first beat of play: bars of BPM × beats per bar, or plain seconds. */
+const PAT_N = 8, PAT_L = 'ABCDEFGH';
+const PAT_QUANT = [0, 0.25, 0.5, 1, 2, 4, 8, 16];
+const PAT_FADE = [0, 0.25, 0.5, 1, 2, 4, 8];
+const PAT_COMMIT = 0.12, PAT_LOOK = 0.35;   // seconds: put a switch on the audio clock / queue the next chain step
+const P = S.pat = { unit: 'bar', bpm: 120, bpb: 4, quant: 1, fade: 0, end: 'loop', chainOn: false, pads: Array(PAT_N).fill(null), chain: [], cur: -1 };
+const PT = { queued: null, step: -1, stepEnd: null, desc: '', pos: '' };
+const unitDur = () => P.unit === 'bar' ? P.bpb * 60 / P.bpm : 1;
+const fracTxt = n => n === 0.25 ? '¼' : n === 0.5 ? '½' : String(+n.toFixed(2));
+const fmtUnits = n => P.unit === 'bar' ? `${fracTxt(n)} ${n <= 1 ? 'bar' : 'bars'}` : `${fracTxt(n)} s`;
+// ctx time of the next grid line (every q units from the start of play) at or after `from`
+function nextLine(q, from) { const u = unitDur() * q, k = Math.ceil((from - S.t0) / u - 1e-6); return S.t0 + Math.max(0, k) * u; }
+function patSay(msg) { PT.desc = ''; $('#patDesc').textContent = msg; PT.sayUntil = performance.now() + 3500; }
+
+function patStore(i) {
+  if (!S.tapes.length) { toast('Add some tapes before storing a pattern.'); return; }
+  const old = P.pads[i];
+  P.pads[i] = { name: old ? old.name : '', tapes: S.tapes.map(t => ({ id: t.id, on: !t.p.mute, vol: t.p.vol })) };
+  P.cur = i;
+  const n = S.tapes.filter(t => !t.p.mute).length;
+  patSay(`Stored pattern ${PAT_L[i]}: ${n} of ${S.tapes.length} tapes playing, with their levels.`);
+  patRender(); patRenderChain();
+}
+function patClearPad(i) {
+  if (!P.pads[i]) return;
+  P.pads[i] = null; if (P.cur === i) P.cur = -1;
+  if (PT.queued && PT.queued.pad === i) PT.queued = null;
+  patSay(`Emptied pad ${PAT_L[i]}.`); patRender(); patRenderChain();
+}
+// Set the tapes to pad i. when = ctx time to switch on (null: now, no scheduling); fade in seconds.
+function patApply(i, when, fade) {
+  const pad = P.pads[i]; if (!pad) return;
+  P.cur = i;
+  const solo = anySolo();
+  for (const e of pad.tapes) {
+    const t = S.tapes.find(x => x.id === e.id); if (!t) continue;
+    t.p.mute = !e.on; if (e.vol != null) t.p.vol = e.vol;
+    if (when == null || !AC || !t.ch) applyChannel(t);
+    else patSchedule(t, when, fade, solo);
+    syncCtl(`t${t.id}:mute`); if (e.vol != null) syncCtl(`t${t.id}:vol`);
+  }
+  for (let k = 0; k < PAT_N; k++) syncCtl(`p:${k}`);
+}
+function patSchedule(t, when, fade, solo) {
+  const n = t.ch, on = !t.p.mute && (!solo || t.p.solo);
+  const ramp = (param, v) => {
+    param.cancelScheduledValues(when);
+    if (fade > 0.001) { param.setValueAtTime(param.value, when); param.linearRampToValueAtTime(v, when + fade); }
+    else param.setTargetAtTime(v, when, 0.004);
+  };
+  ramp(n.fader.gain, faderGain(t.p.vol)); ramp(n.mute.gain, on ? 1 : 0);
+  t._gateAhead = when + fade;   // until then applyParams leaves the shared on/off state alone
+  linkGate(t, on, when, fade > 0.001 ? fade : 0.012);
+}
+// how: 'manual' (a pad, a key or MIDI) or 'chain'
+function patLaunch(i, how = 'manual') {
+  if (!P.pads[i]) { patSay(`Pad ${PAT_L[i]} is empty. Press Store, then the pad, to keep the deck as it is now.`); return; }
+  let step = -1;
+  if (how === 'manual' && P.chainOn) {
+    step = P.chain.findIndex(s => s.pad === i);
+    if (step < 0) { P.chainOn = false; PT.stepEnd = null; syncCtl('p:chain'); patSay(`Chain off: pattern ${PAT_L[i]} isn't in it.`); }
+  }
+  if (!S.playing || !AC) {
+    patApply(i, null, 0); PT.queued = null;
+    if (P.chainOn) PT.step = step >= 0 ? step : PT.step;
+    patRender(); return;
+  }
+  const now = AC.currentTime;
+  const at = P.quant > 0 ? nextLine(P.quant, now + 0.03) : now + 0.02;
+  PT.queued = { pad: i, at, step };
+  patTick(); patRender();
+}
+function patTick() {
+  if (!S.playing || !AC) return;
+  const now = AC.currentTime;
+  if (P.chainOn && P.chain.length && !PT.queued && PT.stepEnd != null && PT.stepEnd - now < PAT_LOOK) {
+    let j = PT.step + 1;
+    if (j >= P.chain.length) {
+      if (P.end !== 'loop') { P.chainOn = false; PT.stepEnd = null; syncCtl('p:chain'); patSay('The chain has finished. The last pattern keeps playing.'); patRender(); return; }
+      j = 0;
+    }
+    PT.queued = { pad: P.chain[j].pad, at: PT.stepEnd, step: j };
+  }
+  const q = PT.queued;
+  if (q && q.at - now < PAT_COMMIT) {
+    PT.queued = null;
+    if (q.step >= 0 && P.chainOn && P.chain[q.step]) { PT.step = q.step; PT.stepEnd = q.at + P.chain[q.step].len * unitDur(); }
+    if (P.pads[q.pad]) patApply(q.pad, Math.max(q.at, now + 0.005), P.fade * unitDur());
+    patRender();
+  }
+}
+setInterval(patTick, 20);
+function patChainStart() {
+  if (!P.chain.length) return false;
+  PT.step = -1; PT.stepEnd = null; PT.queued = null;
+  if (!S.playing || !AC) { PT.step = 0; if (P.pads[P.chain[0].pad]) patApply(P.chain[0].pad, null, 0); return true; }
+  PT.queued = { pad: P.chain[0].pad, at: nextLine(P.quant > 0 ? P.quant : 1, AC.currentTime + 0.03), step: 0 };
+  return true;
+}
+function patOnPlay(t0) {
+  PT.queued = null; PT.stepEnd = null;
+  if (P.chainOn && P.chain.length) {
+    PT.step = 0;
+    if (P.pads[P.chain[0].pad]) patApply(P.chain[0].pad, Math.max(t0, AC.currentTime), 0);
+    PT.stepEnd = t0 + P.chain[0].len * unitDur();
+  }
+  patRender();
+}
+function patOnStop() { PT.queued = null; PT.stepEnd = null; if (P.chainOn) PT.step = 0; patRender(); }
+
+/* ---- pattern UI ---- */
+const patPadEls = [];
+for (let i = 0; i < PAT_N; i++) {
+  defCtl(`p:${i}`, { label: `Pattern ${PAT_L[i]}`, toggle: true, get: () => P.cur === i, set: () => patLaunch(i) });
+  S.midiMap[`p:${i}`] = { ch: 16, type: 'note', num: 36 + i };
+  const b = h('button', { class: 'pat empty', 'data-ctl': `p:${i}` }, h('span', { class: 'led' }), h('b', {}, PAT_L[i]), h('small', {}, 'empty'));
+  b.addEventListener('click', () => {
+    if (S.learn) return;
+    const bar = $('#patBar');
+    if (bar.classList.contains('storing')) { patMode(null); patStore(i); }
+    else if (bar.classList.contains('clearing')) { patMode(null); patClearPad(i); }
+    else if (!P.pads[i]) patStore(i);
+    else patLaunch(i);
+  });
+  b.addEventListener('dblclick', () => {
+    if (!P.pads[i] || S.learn) return;
+    const name = prompt(`Name for pattern ${PAT_L[i]}`, P.pads[i].name || '');
+    if (name != null) { P.pads[i].name = name.trim().slice(0, 24); patRender(); patRenderChain(); }
+  });
+  bindEl(`p:${i}`, b, () => patRender());
+  patPadEls.push(b); $('#patPads').append(b);
+}
+defCtl('p:chain', { label: 'Chain on', toggle: true, get: () => P.chainOn, set: v => {
+  if (v && !P.chain.length) { patSay('Add a step to the chain first.'); syncCtl('p:chain'); return; }
+  P.chainOn = !!v;
+  if (v) patChainStart(); else { PT.stepEnd = null; if (PT.queued && PT.queued.step >= 0) PT.queued = null; }
+  patRender();
+} });
+S.midiMap['p:chain'] = { ch: 16, type: 'cc', num: 23 };
+(() => { const b = $('#patChainOn'); b.addEventListener('click', () => { if (!S.learn) setCtl('p:chain', !P.chainOn); }); bindEl('p:chain', b, () => b.setAttribute('aria-pressed', String(P.chainOn))); })();
+
+function patMode(m) {
+  const bar = $('#patBar');
+  bar.classList.toggle('storing', m === 'store'); bar.classList.toggle('clearing', m === 'clear');
+  $('#patStore').setAttribute('aria-pressed', String(m === 'store')); $('#patClear').setAttribute('aria-pressed', String(m === 'clear'));
+  if (m === 'store') patSay('Tap a pad to store which tapes play now, and their levels.');
+  else if (m === 'clear') patSay('Tap a pad to empty it.');
+}
+$('#patStore').addEventListener('click', () => patMode($('#patBar').classList.contains('storing') ? null : 'store'));
+$('#patClear').addEventListener('click', () => patMode($('#patBar').classList.contains('clearing') ? null : 'clear'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && ($('#patBar').classList.contains('storing') || $('#patBar').classList.contains('clearing'))) patMode(null); });
+
+function patSyncInputs() {
+  $$('#patUnit button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === P.unit)));
+  document.querySelectorAll('#patBar [data-bars]').forEach(el => el.hidden = P.unit !== 'bar');
+  $('#patBpm').value = String(+P.bpm.toFixed(2)); $('#patBpb').value = String(P.bpb);
+  const fill = (sel, list, cur, zero) => { sel.innerHTML = ''; for (const v of list) sel.append(h('option', { value: v }, v === 0 ? zero : (sel.id === 'patQuant' ? 'Next ' : '') + fmtUnits(v))); sel.value = String(cur); };
+  fill($('#patQuant'), PAT_QUANT, P.quant, 'Right away');
+  fill($('#patFade'), PAT_FADE, P.fade, 'Cut');
+  $('#patEnd').value = P.end;
+}
+$$('#patUnit button').forEach(b => b.addEventListener('click', () => { P.unit = b.dataset.v; patSyncInputs(); patRenderChain(); patRender(); }));
+$('#patBpm').addEventListener('change', e => { const v = +e.target.value; if (v >= 20 && v <= 300) P.bpm = v; patSyncInputs(); });
+$('#patBpb').addEventListener('change', e => { const v = Math.round(+e.target.value); if (v >= 1 && v <= 16) P.bpb = v; patSyncInputs(); });
+$('#patQuant').addEventListener('change', e => { P.quant = +e.target.value; });
+$('#patFade').addEventListener('change', e => { P.fade = +e.target.value; });
+$('#patEnd').addEventListener('change', e => { P.end = e.target.value === 'hold' ? 'hold' : 'loop'; });
+$('#patGuess').addEventListener('click', () => {
+  const lens = S.tapes.map(t => t.loopBuf.duration / t.speed).filter(x => x > 0.2);
+  if (!lens.length) { patSay('Add some tapes first.'); return; }
+  const L = Math.max(...lens); let best = null;
+  for (const n of [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]) { const bpm = P.bpb * n * 60 / L; if (bpm >= 20 && bpm <= 300 && (!best || Math.abs(Math.log(bpm / 120)) < Math.abs(Math.log(best.bpm / 120)))) best = { n, bpm }; }
+  if (!best) { patSay('Couldn’t find a tempo that fits these tapes.'); return; }
+  P.bpm = Math.round(best.bpm * 100) / 100; patSyncInputs();
+  patSay(`${P.bpm} BPM: the longest tape (${L.toFixed(2)} s) is ${best.n} ${best.n === 1 ? 'bar' : 'bars'} of ${P.bpb}.`);
+});
+$('#patAddStep').addEventListener('click', () => {
+  const last = P.chain[P.chain.length - 1];
+  let pad = last ? last.pad + 1 : 0;
+  for (let k = 0; k < PAT_N && !P.pads[pad % PAT_N]; k++) pad++;
+  P.chain.push({ pad: pad % PAT_N, len: last ? last.len : (P.unit === 'bar' ? 4 : 8) });
+  patRenderChain(); patRender();
+});
+function patRenderChain() {
+  const box = $('#patChain'); box.innerHTML = '';
+  if (!P.chain.length) { box.append(h('span', { class: 'tape-meta' }, 'No steps yet.')); return; }
+  P.chain.forEach((st, j) => {
+    const sel = h('select', { class: 'sel', 'aria-label': `Step ${j + 1} pattern` }, ...Array.from({ length: PAT_N }, (_, i) => h('option', { value: i }, PAT_L[i] + (P.pads[i] ? (P.pads[i].name ? ' · ' + P.pads[i].name : '') : ' (empty)'))));
+    sel.value = String(st.pad);
+    sel.addEventListener('change', () => { st.pad = +sel.value; patRender(); });
+    const len = h('input', { type: 'number', class: 'num-in', min: 0.25, max: 999, step: P.unit === 'bar' ? 1 : 0.5, value: st.len, 'aria-label': `Step ${j + 1} length` });
+    len.addEventListener('change', () => {
+      const v = +len.value; if (v >= 0.25 && v <= 999) {
+        const d = v - st.len; st.len = v;
+        if (j === PT.step && PT.stepEnd != null) PT.stepEnd += d * unitDur();   // stretch the step that's playing
+      }
+      len.value = st.len;
+    });
+    const x = h('button', { class: 'x', 'aria-label': `Remove step ${j + 1}`, onclick: () => {
+      P.chain.splice(j, 1);
+      if (PT.step >= j) PT.step--;
+      if (!P.chain.length && P.chainOn) setCtl('p:chain', false);
+      patRenderChain(); patRender();
+    } }, '×');
+    box.append(h('span', { class: 'step', 'data-step': j }, sel, len, h('span', { class: 'unit' }, P.unit === 'bar' ? 'bars' : 's'), x));
+  });
+}
+function patRender() {
+  patPadEls.forEach((b, i) => {
+    const pd = P.pads[i];
+    b.classList.toggle('empty', !pd); b.classList.toggle('cur', P.cur === i && !!pd);
+    b.classList.toggle('queued', !!(PT.queued && PT.queued.pad === i));
+    const on = pd ? pd.tapes.filter(e => e.on && S.tapes.some(t => t.id === e.id)).length : 0;
+    b.querySelector('small').textContent = pd ? (pd.name || `${on} on`) : 'empty';
+    b.title = pd ? `Pattern ${PAT_L[i]}${pd.name ? ' · ' + pd.name : ''}: ${on} tape${on === 1 ? '' : 's'} playing. Double-click to name it.` : `Pad ${PAT_L[i]} is empty: tap to store the deck as it is now`;
+  });
+  $$('#patChain .step').forEach(el => el.classList.toggle('on', P.chainOn && +el.dataset.step === PT.step && S.playing));
+}
+function patFrame() {
+  patTick();
+  let pos = '—';
+  if (S.playing && AC) {
+    const g = (AC.currentTime - S.t0) / unitDur();
+    if (g >= 0) pos = P.unit === 'bar' ? `${Math.floor(g) + 1}.${Math.floor((g % 1) * P.bpb) + 1}` : `${g.toFixed(1)} s`;
+  }
+  if (pos !== PT.pos) { PT.pos = pos; $('#patPos').textContent = pos === '—' ? pos : (P.unit === 'bar' ? 'Bar ' : '') + pos; }
+  if (PT.sayUntil && performance.now() < PT.sayUntil) return;
+  let d = '';
+  const now = AC ? AC.currentTime : 0, u = unitDur();
+  const left = at => { const n = Math.max(0, (at - now) / u); return P.unit === 'bar' ? `${n.toFixed(n < 10 ? 1 : 0)} ${n === 1 ? 'bar' : 'bars'}` : `${n.toFixed(1)} s`; };
+  const name = i => PAT_L[i] + (P.pads[i] && P.pads[i].name ? ` (${P.pads[i].name})` : '');
+  if (S.playing && PT.queued) d = `Switching to ${name(PT.queued.pad)} in ${left(PT.queued.at)}.`;
+  else if (S.playing && P.chainOn && PT.stepEnd != null) d = `Chain step ${PT.step + 1} of ${P.chain.length}: ${P.cur >= 0 ? name(P.cur) : '—'}, ${left(PT.stepEnd)} to go.`;
+  else if (P.chainOn) d = `The chain runs from step 1 when you press play.`;
+  else if (!P.pads.some(Boolean)) d = 'Set the deck how you want it, then press an empty pad to store it as a pattern. Tap a stored pad to switch to it on the next grid line, or chain them.';
+  else d = P.cur >= 0 ? `Playing pattern ${name(P.cur)}.` : 'Tap a pad to switch to it.';
+  if (d !== PT.desc) { PT.desc = d; $('#patDesc').textContent = d; }
+}
+function patSerialize() {
+  const idx = id => S.tapes.findIndex(t => t.id === id);
+  return { v: 1, unit: P.unit, bpm: P.bpm, bpb: P.bpb, quant: P.quant, fade: P.fade, end: P.end, chainOn: P.chainOn,
+    pads: P.pads.map(pd => pd ? { name: pd.name || '', t: pd.tapes.map(e => [idx(e.id), e.on ? 1 : 0, e.vol]).filter(r => r[0] >= 0) } : null),
+    chain: P.chain.map(s => [s.pad, s.len]) };
+}
+function patLoad(d, made) {
+  PT.queued = null; PT.stepEnd = null; PT.step = -1; P.cur = -1;
+  P.pads = Array(PAT_N).fill(null); P.chain = []; P.chainOn = false;
+  const isNum = (v, lo, hi) => typeof v === 'number' && isFinite(v) && v >= lo && v <= hi;
+  if (d && typeof d === 'object') {
+    if (d.unit === 'bar' || d.unit === 'sec') P.unit = d.unit;
+    if (isNum(d.bpm, 20, 300)) P.bpm = d.bpm;
+    if (isNum(d.bpb, 1, 16)) P.bpb = Math.round(d.bpb);
+    if (PAT_QUANT.includes(d.quant)) P.quant = d.quant;
+    if (PAT_FADE.includes(d.fade)) P.fade = d.fade;
+    P.end = d.end === 'hold' ? 'hold' : 'loop';
+    (Array.isArray(d.pads) ? d.pads : []).slice(0, PAT_N).forEach((pd, i) => {
+      if (!pd || !Array.isArray(pd.t)) return;
+      P.pads[i] = { name: String(pd.name || '').slice(0, 24),
+        tapes: pd.t.filter(r => Array.isArray(r) && made[r[0]]).map(r => ({ id: made[r[0]].id, on: !!r[1], vol: isNum(r[2], -60, 6) ? r[2] : null })) };
+    });
+    for (const r of Array.isArray(d.chain) ? d.chain : []) if (Array.isArray(r) && isNum(r[0], 0, PAT_N - 1) && isNum(r[1], 0.25, 999)) P.chain.push({ pad: Math.round(r[0]), len: r[1] });
+    P.chainOn = !!d.chainOn && P.chain.length > 0;
+  }
+  if (P.chainOn) { PT.step = 0; if (P.pads[P.chain[0].pad]) patApply(P.chain[0].pad, null, 0); }
+  syncCtl('p:chain'); patSyncInputs(); patRenderChain(); patRender();
+}
+patSyncInputs(); patRenderChain(); patRender();
+
+/* ================= Deck Link: tapes for other apps =================
+   Axis Stack (and any app with the DECK-LINK block) can pick a tape on this deck and play its own
+   copy in time with it, through its own effects. The deck tells them each tape's audio version,
+   length, speed and where its loop is on the shared clock, plus whether the deck is sounding it
+   (mute, solo, patterns), including pattern switches that are about to happen. */
+var DL = null, linkT = 0;
+function linkChanged() { if (!linkT) linkT = setTimeout(() => { linkT = 0; if (DL) DL.changed(); }, 0); }
+function linkGate(t, on, ctxTime, fadeS) {
+  const at = AC ? guestWallAtCtx(ctxTime) + guestEarlyMs() : wallNow();
+  if (t.gate.on === on) return;
+  t.gate = { on, at, fade: fadeS };
+  linkChanged();
+}
+DL = DeckLink.deck({
+  title: 'Tape Loop Deck',
+  tapes: () => S.tapes.map(t => {
+    const live = !!(S.playing && AC && t.voice);
+    return { id: t.id, name: t.name, ver: t.ver, len: t.loopBuf.duration, speed: t.speed, playing: live,
+      anchorWall: live ? guestWallAtCtx(t.anchorCtx) + guestEarlyMs() : 0, anchorPhase: t.anchorPhase,
+      on: AC ? t.gate.on : !t.p.mute && (!anySolo() || t.p.solo), onAt: t.gate.at, fadeMs: Math.round(t.gate.fade * 1000) };
+  }),
+  audio: id => {
+    const t = S.tapes.find(x => String(x.id) === id); if (!t) return null;
+    const b = t.loopBuf;
+    return { ver: t.ver, sampleRate: b.sampleRate, left: b.getChannelData(0), right: b.getChannelData(b.numberOfChannels > 1 ? 1 : 0) };
+  },
+  onTakers: map => {
+    for (const t of S.tapes) {
+      if (!t.ui || !t.ui.linked) continue;
+      const who = map[String(t.id)];
+      t.ui.linked.hidden = !who; if (who) t.ui.linked.textContent = '↗ ' + [...new Set(who)].join(', ');
+    }
+  }
+});
 
 (async function boot() {
   refreshMixer(); refreshMap();

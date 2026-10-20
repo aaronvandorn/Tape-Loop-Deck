@@ -4,6 +4,8 @@ A virtual tape loop player that runs entirely in the browser (Web Audio API).
 
 - **Deck:** upload sounds and each becomes a tape loop. Loop the clip at its own length, or pad it with silence to a set tape length and drag the clip to where it should start. Varispeed, reverse, and spinning reels.
 - **Scenes:** built-in sets (Studio demo, Nature, Microhouse, Empty deck), all synthesized in the browser. Save your current set as a named scene and recall it later; saved scenes, audio included, are kept in your browser.
+- **Patterns:** store which tapes play, and their levels, on pads A–H, then switch between them on the next grid line or chain them to change after set counts of bars or seconds. See [Patterns and transitions](#patterns-and-transitions).
+- **Deck Link:** Axis Stack can pick any tape and play a copy of it in time with the deck, through its XY effects. See [Tapes in Axis Stack](#tapes-in-axis-stack).
 - **Mixer:** a performance console with one strip per tape: gain, 3-band EQ with sweepable mid, an effects bus (tape drive, echo, reverb), tape speed, balance, volume fader, mute and solo.
 - **MIDI:** every major control is mappable. Each strip gets its own MIDI channel with a default CC layout, and MIDI learn remaps anything. Needs a browser with Web MIDI (Chrome, Edge, Opera).
 - **Capture:** record bar-exact clips straight from Logic Rhythm, Boolean Melody Machine, Choir, Pocket Grains, Pocket Mouse and Padfield running in other tabs. See [Capture from apps](#capture-from-apps).
@@ -11,6 +13,27 @@ A virtual tape loop player that runs entirely in the browser (Web Audio API).
 - Dark and light themes.
 
 Nothing is uploaded; all audio stays in your browser.
+
+## Patterns and transitions
+
+The **Patterns** bar on the Deck tab holds eight patterns, A–H. A pattern is a snapshot of the deck: which tapes play (mute) and each tape's volume.
+
+- **Store:** set the deck how you want it and tap an empty pad, or press **Store** and then a pad to overwrite it. **Clear** then a pad empties it. Double-click a pad to name it.
+- **Switch on the fly:** tap a stored pad. While the deck plays, the switch waits for the next grid line set under **Switch** (right away, ¼ bar up to 16 bars); the pad's light blinks until it lands. Stopped, it switches straight away.
+- **Grid:** bars of **BPM** × **Beats/bar**, counted from the moment you press play, or plain **Seconds**. **From tapes** picks a tempo that makes the longest tape a whole number of bars.
+- **Fade:** cut, or ramp the levels over ¼ bar up to 8 bars (or seconds).
+- **Chain:** add steps (a pattern and how many bars or seconds it lasts) and turn **Chain** on. Play starts at step 1; each step hands over to the next exactly on time. **At the end** loops the chain or stays on the last pattern. Tapping a pad while the chain runs jumps to that pattern's step; tapping one that isn't in the chain turns the chain off.
+- Switches are scheduled on the audio clock just ahead of the line, so they land on the sample.
+- **MIDI:** patterns A–H are notes 36–43 on channel 16 and Chain on/off is CC 23, all remappable with MIDI learn or the MIDI map.
+- Patterns, grid and chain save with projects and saved scenes. The **Microhouse** scene comes with four patterns and a chain to try.
+
+## Tapes in Axis Stack
+
+Open the deck and [Axis Stack](https://aaronvandorn.github.io/Axis-Stack/) in tabs of the same browser. In Axis Stack choose **Source → Deck** and pick a tape. Axis Stack gets the tape's loop once and plays its own copy locked to the deck's playback (within a millisecond or so), through its axis chains, while the deck keeps playing the tape as usual. The tape's card on the deck shows **↗ Axis Stack** while it's in use.
+
+The copy follows the deck: it starts and stops with it, follows the tape's speed, picks up edits (trim, reverse, placement), and goes quiet while the deck has the tape muted, including pattern switches, which reach Axis Stack a moment early so both change on the same line.
+
+This uses the shared `deck-link.js` module (embedded between `DECK-LINK` markers in both apps), a BroadcastChannel on the shared clock. Same browser and same site only.
 
 ## Capture from apps
 
