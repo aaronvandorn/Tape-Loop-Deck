@@ -264,6 +264,27 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
 .maptable select,.maptable input{background:var(--well);border:1px solid var(--line);border-radius:4px;padding:2px 4px;font-size:13px}
 .maptable input{width:60px;font-family:var(--mono)}
 
+/* ---------- sound design room */
+.sdgen .scenerow select{min-width:0;max-width:100%}
+.sdgen .num-in{width:72px;background:var(--well);border:1px solid var(--line);border-radius:4px;padding:5px 6px;font-family:var(--mono);font-size:13px}
+.sdbench{margin-bottom:14px}
+.sdbench .tape-name{max-width:none}
+.sdwave{height:110px}
+.sdempty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:14px}
+.sdbench .ctrls{align-items:center}
+.sdbench .btn[aria-pressed="true"]{background:var(--oxide);border-color:var(--oxide-hi);color:var(--on-accent)}
+.sdmore summary .tape-meta{font-family:var(--ui);font-weight:400;font-size:13px;letter-spacing:0;margin-left:6px}
+.sdmods{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;margin-top:10px}
+.mod{background:var(--panel-2);border:1px solid var(--line);border-top:3px solid var(--oxide);border-radius:6px;padding:10px 12px 12px;display:grid;gap:10px;align-content:start}
+.mod header{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+.mod h3{font-family:var(--display);font-weight:800;font-size:17px;letter-spacing:.06em;text-transform:uppercase;margin:0}
+.mod .knobs{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px}
+.mod .pot.col{min-width:44px}
+.mod .seg button{padding:4px 9px;font-size:13px}
+.mod select.sel{max-width:150px}
+.rollwrap{position:relative;height:84px;background:var(--well);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+.rollwrap canvas{position:absolute;inset:0;width:100%;height:100%}
+
 /* ---------- overlay */
 .overlay{position:fixed;inset:0;z-index:50;background:var(--scrim);display:grid;place-items:center;padding:16px}
 .sheet{width:min(560px,100%);max-height:calc(100% - 32px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:18px 20px;display:grid;gap:16px}
@@ -295,6 +316,7 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
     <div class="tabs" role="tablist">
       <button role="tab" id="tab-deck" aria-selected="true" aria-controls="room-deck">Deck</button>
       <button role="tab" id="tab-mixer" aria-selected="false" aria-controls="room-mixer">Mixer</button>
+      <button role="tab" id="tab-sound" aria-selected="false" aria-controls="room-sound">Sound design</button>
     </div>
     <div class="transport">
       <button class="play" id="play" aria-pressed="false" aria-label="Play all tapes" data-ctl="m:play"><svg viewBox="0 0 20 20"><path id="playglyph" d="M5 3l12 7-12 7z"/></svg></button>
@@ -402,6 +424,44 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
       <summary>MIDI map</summary>
       <p class="tape-meta">Each strip has its own MIDI channel. Picking a channel lays out a default set of CCs (Volume 7, Balance 10, Gain 20, High 21, Mid 22, Mid freq 23, Low 24, Drive 25, Echo 26, Echo time 27, Feedback 28, Reverb 29, Tape speed 30, Mute 31, Solo 32). Change any row here or use MIDI learn.</p>
       <div class="maptable-wrap"><table class="maptable"><thead><tr><th>Control</th><th>Channel</th><th>Type</th><th>Number</th><th></th></tr></thead><tbody id="mapBody"></tbody></table></div>
+    </details>
+  </section>
+  <section class="room" id="room-sound" role="tabpanel" aria-labelledby="tab-sound" hidden>
+    <div class="scenebar sdgen" aria-label="Generate a sound">
+      <div class="scenerow">
+        <span class="pair"><label class="lbl" for="sdType">Sound</label> <select class="sel" id="sdType"></select></span>
+        <span class="pair"><label class="lbl" for="sdLen">Length</label> <select class="sel" id="sdLen"></select></span>
+        <span class="pair"><span class="lbl">Ending</span>
+          <span class="seg" id="sdEnd" role="group" aria-label="Ending"><button data-v="loop" aria-pressed="true" title="Every note, tail and echo is brought to silence before the loop point, so it repeats without a click">Loop · ends in silence</button><button data-v="free" aria-pressed="false" title="Notes and echoes run straight off the end, whatever that sounds like">Free running</button></span></span>
+        <span class="pair"><label class="lbl" for="sdKey">Key</label> <select class="sel" id="sdKey"></select> <select class="sel" id="sdScale" aria-label="Mode"></select></span>
+        <span class="pair"><label class="lbl" for="sdBpm">BPM</label> <input type="number" class="num-in" id="sdBpm" min="20" max="300" step="0.1" value="124"> <button class="btn small" id="sdDeckBpm" title="Use the tempo of the deck’s pattern grid">Deck tempo</button></span>
+        <span class="grow"></span>
+        <button class="btn primary" id="sdGen">Generate</button>
+      </div>
+      <div class="scene-desc" id="sdDesc" aria-live="polite"></div>
+    </div>
+    <article class="tape sdbench" aria-label="Current sound">
+      <div class="tape-head">
+        <input class="tape-name" id="sdName" maxlength="40" aria-label="Sound name" placeholder="Generate a sound">
+        <span class="tape-meta" id="sdMeta"></span>
+      </div>
+      <div class="stripwrap sdwave" id="sdWaveWrap"><canvas id="sdWave"></canvas><div class="playhead" id="sdHead" hidden></div>
+        <div class="sdempty" id="sdEmpty">Pick a sound and press Generate.</div></div>
+      <div class="ctrls">
+        <button class="btn" id="sdAud" aria-pressed="false">▶ Audition</button>
+        <button class="btn" id="sdNotes" title="New notes and rhythm, same sound">Re-roll notes</button>
+        <button class="btn" id="sdSound" title="New patch, same notes">Re-roll sound</button>
+        <span class="status" id="sdStatus" aria-live="polite"></span>
+        <span class="grow" style="flex:1 1 auto"></span>
+        <button class="btn" id="sdUpdate" hidden>Update tape</button>
+        <button class="btn primary" id="sdAdd">Add to deck</button>
+      </div>
+      <p class="tape-meta" id="sdTempoNote" hidden></p>
+    </article>
+    <details class="map sdmore" id="sdDetails">
+      <summary>Details <span class="tape-meta">oscillators, filters, envelopes, LFOs, VCA, envelope filter, drive and echo</span></summary>
+      <p class="tape-meta">Every change re-renders the sound; while it auditions you hear it straight away. Double-click a knob to reset it. Changes stay here until you add the sound to the deck or update its tape.</p>
+      <div class="sdmods" id="sdMods"></div>
     </details>
   </section>
 </main>
@@ -1559,7 +1619,7 @@ function createTape(o) {
     mode: o.mode || 'loop', tapeLen: o.tapeLen || Math.max(1, Math.round(o.clip.duration * 2 * 10) / 10), offset: o.offset || 0,
     speed: o.speed || 1, reverse: !!o.reverse, note: o.note != null ? o.note : 60 + (S.tapes.length * 2) % 24,
     midiCh: 0, p: Object.assign(defaultP(), o.p || {}), demo: !!o.demo, voice: null, ch: null, anchorCtx: 0, anchorPhase: 0, reelA: [0, 0],
-    ver: 1, gate: { on: true, at: 0, fade: 0 }
+    ver: 1, gate: { on: true, at: 0, fade: 0 }, sd: o.sd ? sdSanitize(sdClone(o.sd)) : null
   };
   t.src = o.clip;
   t.trimIn = clamp(o.trimIn || 0, 0, o.clip.duration);
@@ -1593,7 +1653,7 @@ function removeTape(t) {
 }
 function renumber() { S.tapes.forEach((t, i) => { if (t.ui) t.ui.no.textContent = String(i + 1).padStart(2, '0'); }); }
 function duplicateTape(t) {
-  createTape({ name: t.name + ' copy', clip: t.src, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, srcBytes: t.srcBytes, srcType: t.srcType, srcName: t.srcName, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, p: Object.assign({}, t.p, { solo: false }) });
+  createTape({ name: t.name + ' copy', clip: t.src, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, srcBytes: t.srcBytes, srcType: t.srcType, srcName: t.srcName, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, sd: t.sd, p: Object.assign({}, t.p, { solo: false }) });
   renumber();
 }
 async function decodeBytes(bytes) { return await DEC.decodeAudioData(bytes.slice(0)); }
@@ -1611,7 +1671,7 @@ async function replaceAudio(t, f) {
   try {
     const bytes = await f.arrayBuffer(); const buf = await decodeBytes(bytes);
     t.src = buf; t.trimIn = 0; t.trimOut = buf.duration; t.fadeIn = 0; t.fadeOut = 0; t.clip = buf; t._clipDirty = false;
-    t.srcBytes = bytes; t.srcType = f.type; t.srcName = f.name;
+    t.srcBytes = bytes; t.srcType = f.type; t.srcName = f.name; t.sd = null; if (t.ui.sdBtn) t.ui.sdBtn.hidden = true;
     if (t.offset >= t.tapeLen) t.offset = 0;
     rebuild(t); drawTrimWave(t); updateTrimUI(t); toast(`Loaded ${f.name} onto ${t.name}.`);
   } catch (e) { toast(`Couldn't read ${f.name}. Try WAV, MP3, OGG or FLAC.`); }
@@ -1660,6 +1720,7 @@ function buildCard(t) {
   ui.card = h('article', { class: 'tape' },
     h('div', { class: 'tape-head' }, ui.no, ui.name, ui.meta, ui.linked,
       h('div', { class: 'tape-acts' },
+        ui.sdBtn = h('button', { class: 'btn small', hidden: !t.sd, title: 'Open this sound on the Sound design tab and reshape it', onclick: () => sdOpenTape(t) }, 'Edit sound'),
         ui.trimBtn, h('button', { class: 'btn small', onclick: () => fileIn.click() }, 'Replace sound'),
         h('button', { class: 'btn small', onclick: () => duplicateTape(t) }, 'Duplicate'), rmBtn, fileIn)),
     h('div', { class: 'deckrow' }, ui.reels, h('div', { class: 'stripbox' }, ui.stripwrap, ui.info)),
@@ -2438,7 +2499,7 @@ function serializeProject(name) {
     app: 'tape-loop-deck', version: 1, name: name || $('#projName').value, snap: S.snap, master: S.master, midiMap: map,
     mxOn: S.mxOn, mxLvl: S.mxLvl, matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number); return [S.tapes.findIndex(t => t.id === a), S.tapes.findIndex(t => t.id === b), db]; }).filter(r => r[0] >= 0 && r[1] >= 0),
     tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, p: t.p, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve,
-      audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) } })),
+      audio: { name: t.srcName || t.name + '.wav', type: t.srcBytes ? t.srcType : 'audio/wav', data: abToB64(t.srcBytes || encodeWAV(t.src)) }, sd: t.sd || undefined })),
     patterns: patSerialize()
   };
   return proj;
@@ -2467,7 +2528,7 @@ async function applyProject(proj, { announce = true } = {}) {
     try {
       const bytes = b64ToAb(pt.audio.data), clip = await decodeBytes(bytes);
       made.push(createTape({ name: pt.name, clip, srcBytes: bytes, srcType: pt.audio.type, srcName: pt.audio.name,
-        mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, trimIn: pt.trimIn, trimOut: pt.trimOut, fadeIn: pt.fadeIn, fadeOut: pt.fadeOut, fadeCurve: pt.fadeCurve, quiet: true }));
+        mode: pt.mode, tapeLen: pt.tapeLen, offset: pt.offset, speed: pt.speed, reverse: pt.reverse, note: pt.note, midiCh: pt.midiCh || 0, p: pt.p, trimIn: pt.trimIn, trimOut: pt.trimOut, fadeIn: pt.fadeIn, fadeOut: pt.fadeOut, fadeCurve: pt.fadeCurve, sd: pt.sd, quiet: true }));
     } catch (e) { made.push(null); toast(`Couldn't decode the audio for ${pt.name}.`); }
   }
   for (const r of Array.isArray(proj.matrix) ? proj.matrix : []) {
@@ -2517,12 +2578,15 @@ $('#durX4').addEventListener('click', () => $('#expDur').value = Math.min(1800, 
 
 function showTab(name) {
   S.tab = name;
-  for (const n of ['deck', 'mixer']) { $('#tab-' + n).setAttribute('aria-selected', String(n === name)); $('#room-' + n).hidden = n !== name; }
+  if (name !== 'sound' && typeof sdStopAudition === 'function' && SD.aud) sdStopAudition();
+  for (const n of ['deck', 'mixer', 'sound']) { $('#tab-' + n).setAttribute('aria-selected', String(n === name)); $('#room-' + n).hidden = n !== name; }
   if (name === 'deck') S.tapes.forEach(t => { sizeCanvas(t.ui.reels); drawStripStatic(t); });
+  if (name === 'sound') sdShown();
   try { localStorage.setItem('tld-tab', name); } catch (e) {}
 }
 $('#tab-deck').addEventListener('click', () => showTab('deck'));
 $('#tab-mixer').addEventListener('click', () => showTab('mixer'));
+$('#tab-sound').addEventListener('click', () => showTab('sound'));
 
 $('#addBtn').addEventListener('click', () => $('#fileIn').click());
 $('#addBtn2').addEventListener('click', () => $('#fileIn').click());
@@ -2558,13 +2622,13 @@ function frame(now) {
       t.ui.head.style.left = (phaseNow(t) / t.loopBuf.duration * 100) + '%';
       if (t.aud && AC) t.ui.trimHead.style.left = (Math.min(t.aud.from + AC.currentTime - t.aud.start, t.src.duration) / t.src.duration * 100) + '%';
     }
-  } else {
+  } else if (S.tab === 'mixer') {
     for (const t of S.tapes) if (t.ui && t.ui.meter) updateMeter(t.ui.meter, S.playing && t.ch ? t.ch.an : null);
     updateMeter(MASTER_UI.meter, S.playing && MASTER ? MASTER.an : null);
     for (const t of S.tapes) if (t.ui && t.ui.mxBar) updateBar(t.ui.mxBar, t.ch ? t.ch.mxAn : null);
   }
   $('#counter').textContent = fmtTime(S.playing && AC ? AC.currentTime - S.t0 : 0);
-  patFrame();
+  patFrame(); sdFrame();
   requestAnimationFrame(frame);
 }
 
@@ -3630,9 +3694,703 @@ DL = DeckLink.deck({
   }
 });
 
+/* ================= sound design =================
+   A small modular synth that renders loops offline. A generated sound is a recipe: a note sequence
+   plus a patch — two VCOs (VCO 2 can FM VCO 1), a sub and a noise source, a VCF with its own ADSR,
+   a VCA with its ADSR, a pitch envelope, two LFOs, an envelope filter (an envelope follower sweeping
+   a resonant filter), drive and a tempo-synced delay. The recipe travels with the tape, so a sound
+   can be reopened here and reshaped later. In Loop mode every note, tail and echo is brought to
+   silence before the loop point, so the loop repeats without a click. */
+const SD_TYPES = {
+  chord:   { name: 'Chord stab',     desc: 'Dub-chord stabs: minor 7ths, 9ths and 11ths, short and filtered, thrown into a dotted-8th echo.' },
+  melody:  { name: 'Melody',         desc: 'A sparse, plinky line of FM blips in a minor mode, with plenty of space and echo.' },
+  bass:    { name: 'Bassline',       desc: 'A round, rubbery bass that leans on the offbeats, with short notes and a tight filter.' },
+  drone:   { name: 'Drone',          desc: 'A long detuned chord that breathes with slow filter and stereo movement.' },
+  click:   { name: 'Clicks',         desc: 'Tiny resonant ticks and glitches on swung 16ths, scattered across the stereo field.' },
+  perc:    { name: 'Percussion',     desc: 'Wood blocks, rims and small toms: pitched bodies with a snap of noise and a pitch drop.' },
+  hats:    { name: 'Hats & shakers', desc: 'Filtered noise hats with offbeat accents, ghosted 16ths and the odd open hat.' },
+  texture: { name: 'Texture',        desc: 'A bed of hiss and air that drifts and stutters under random LFOs.' }
+};
+const SD_LENS = [['b:0.25', '¼ bar'], ['b:0.5', '½ bar'], ['b:1', '1 bar'], ['b:2', '2 bars'], ['b:4', '4 bars'], ['b:8', '8 bars'], ['b:16', '16 bars'],
+  ['s:1', '1 second'], ['s:2', '2 seconds'], ['s:4', '4 seconds'], ['s:8', '8 seconds'], ['s:15', '15 seconds'], ['s:30', '30 seconds']];
+const SD_SCALES = { dorian: { name: 'Dorian', s: [0, 2, 3, 5, 7, 9, 10] }, minor: { name: 'Minor', s: [0, 2, 3, 5, 7, 8, 10] },
+  phrygian: { name: 'Phrygian', s: [0, 1, 3, 5, 7, 8, 10] }, pent: { name: 'Minor pentatonic', s: [0, 3, 5, 7, 10] } };
+const SD_NN = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+// rhythmic divisions, in 16th-note steps
+const SD_DIVS = [[0.5, '1/32'], [1, '1/16'], [1.5, '1/16 dotted'], [2, '1/8'], [3, '1/8 dotted'], [4, '1/4'], [6, '1/4 dotted'], [8, '2 beats'], [16, '4 beats'], [32, '8 beats'], [64, '16 beats'], [128, '32 beats']];
+const SD_DLY_DIVS = SD_DIVS.filter(d => d[0] <= 16);
+const SD_WAVES = [['sine', 'Sin'], ['triangle', 'Tri'], ['sawtooth', 'Saw'], ['square', 'Sqr']];
+const SD_LFO_WAVES = [['sine', 'Sine'], ['triangle', 'Triangle'], ['square', 'Square'], ['saw', 'Saw down'], ['ramp', 'Ramp up'], ['sh', 'Sample & hold'], ['drift', 'Drift']];
+const SD_LFO_DESTS = [['off', 'Off'], ['pitch', 'Pitch'], ['cutoff', 'Cutoff'], ['amp', 'VCA level'], ['pan', 'Pan'], ['fm', 'FM amount']];
+const SD_FILT = [['lowpass', 'LP'], ['bandpass', 'BP'], ['highpass', 'HP'], ['notch', 'Notch']];
+
+/* numeric patch parameters: range, default, scale ('log' | 'sq' | linear) and display kind */
+const SDP = {
+  'o1.oct': { l: 'Octave', min: -3, max: 2, d: 0, step: 1, k: 'oct' },
+  'o1.fine': { l: 'Fine', min: -50, max: 50, d: 0, step: 1, k: 'ct' },
+  'o1.lvl': { l: 'Level', min: 0, max: 1, d: 0.8, k: 'pct' },
+  'o2.oct': { l: 'Octave', min: -3, max: 3, d: 0, step: 1, k: 'oct' },
+  'o2.semi': { l: 'Semi', min: -12, max: 12, d: 0, step: 1, k: 'st' },
+  'o2.fine': { l: 'Fine', min: -50, max: 50, d: 7, step: 1, k: 'ct' },
+  'o2.lvl': { l: 'Level', min: 0, max: 1, d: 0.4, k: 'pct' },
+  'fm': { l: 'FM → 1', min: 0, max: 8, d: 0, scale: 'sq', k: 'x' },
+  'sub': { l: 'Sub', min: 0, max: 1, d: 0, k: 'pct' },
+  'noise': { l: 'Noise', min: 0, max: 1, d: 0, k: 'pct' },
+  'ncol': { l: 'Color', min: 200, max: 18000, d: 8000, scale: 'log', k: 'hz' },
+  'width': { l: 'Width', min: 0, max: 1, d: 0.3, k: 'pct' },
+  'scatter': { l: 'Scatter', min: 0, max: 1, d: 0, k: 'pct' },
+  'pe.amt': { l: 'Amount', min: -24, max: 48, d: 0, step: 1, k: 'st' },
+  'pe.dec': { l: 'Decay', min: 0.003, max: 1, d: 0.04, scale: 'log', k: 'time' },
+  'vcf.cut': { l: 'Cutoff', min: 30, max: 18000, d: 1500, scale: 'log', k: 'hz' },
+  'vcf.res': { l: 'Res', min: 0, max: 1, d: 0.2, k: 'pct' },
+  'vcf.kt': { l: 'Key trk', min: 0, max: 1, d: 0.4, k: 'pct' },
+  'vcf.env': { l: 'Env amt', min: -4, max: 7, d: 1.5, k: 'oct' },
+  'vcf.rnd': { l: 'Random', min: 0, max: 3, d: 0, k: 'oct' },
+  'fe.a': { l: 'Attack', min: 0.001, max: 4, d: 0.002, scale: 'log', k: 'time' },
+  'fe.d': { l: 'Decay', min: 0.005, max: 6, d: 0.2, scale: 'log', k: 'time' },
+  'fe.s': { l: 'Sustain', min: 0, max: 1, d: 0, k: 'pct' },
+  'fe.r': { l: 'Release', min: 0.005, max: 6, d: 0.15, scale: 'log', k: 'time' },
+  'ae.a': { l: 'Attack', min: 0.001, max: 4, d: 0.002, scale: 'log', k: 'time' },
+  'ae.d': { l: 'Decay', min: 0.005, max: 6, d: 0.3, scale: 'log', k: 'time' },
+  'ae.s': { l: 'Sustain', min: 0, max: 1, d: 0.6, k: 'pct' },
+  'ae.r': { l: 'Release', min: 0.005, max: 6, d: 0.15, scale: 'log', k: 'time' },
+  'vca.lvl': { l: 'Level', min: 0, max: 1, d: 0.8, k: 'pct' },
+  'vca.vel': { l: 'Velocity', min: 0, max: 1, d: 0.6, k: 'pct' },
+  'lfo1.hz': { l: 'Rate', min: 0.02, max: 30, d: 1, scale: 'log', k: 'hz' },
+  'lfo1.depth': { l: 'Depth', min: 0, max: 1, d: 0, k: 'pct' },
+  'lfo2.hz': { l: 'Rate', min: 0.02, max: 30, d: 4, scale: 'log', k: 'hz' },
+  'lfo2.depth': { l: 'Depth', min: 0, max: 1, d: 0, k: 'pct' },
+  'ef.base': { l: 'Base', min: 40, max: 8000, d: 300, scale: 'log', k: 'hz' },
+  'ef.range': { l: 'Sweep', min: -6, max: 6, d: 3, k: 'oct' },
+  'ef.sens': { l: 'Sense', min: 0, max: 1, d: 0.6, k: 'pct' },
+  'ef.q': { l: 'Q', min: 0.5, max: 20, d: 4, scale: 'log', k: 'q' },
+  'ef.att': { l: 'Attack', min: 0.001, max: 0.3, d: 0.006, scale: 'log', k: 'time' },
+  'ef.rel': { l: 'Release', min: 0.01, max: 2, d: 0.15, scale: 'log', k: 'time' },
+  'ef.mix': { l: 'Mix', min: 0, max: 1, d: 1, k: 'pct' },
+  'drive': { l: 'Drive', min: 0, max: 1, d: 0, k: 'pct' },
+  'dly.mix': { l: 'Echo', min: 0, max: 1, d: 0, k: 'pct' },
+  'dly.fb': { l: 'Feedback', min: 0, max: 0.92, d: 0.4, k: 'pct' },
+  'dly.tone': { l: 'Tone', min: 300, max: 16000, d: 3000, scale: 'log', k: 'hz' },
+  'swing': { l: 'Swing', min: 0, max: 0.6, d: 0.15, k: 'pct' },
+  'gate': { l: 'Gate', min: 0.1, max: 4, d: 1, scale: 'log', k: 'x' },
+  'trans': { l: 'Transpose', min: -24, max: 24, d: 0, step: 1, k: 'st' }
+};
+/* choice parameters: the first entry is the default */
+const SDE = {
+  'o1.wave': SD_WAVES.map(x => x[0]), 'o2.wave': ['square', 'sine', 'triangle', 'sawtooth'],
+  'vcf.type': SD_FILT.map(x => x[0]),
+  'lfo1.wave': SD_LFO_WAVES.map(x => x[0]), 'lfo2.wave': SD_LFO_WAVES.map(x => x[0]),
+  'lfo1.dest': SD_LFO_DESTS.map(x => x[0]), 'lfo2.dest': SD_LFO_DESTS.map(x => x[0]),
+  'lfo1.sync': [true, false], 'lfo2.sync': [true, false],
+  'lfo1.div': [16, ...SD_DIVS.map(x => x[0])], 'lfo2.div': [4, ...SD_DIVS.map(x => x[0])],
+  'ef.on': [false, true], 'ef.mode': ['bandpass', 'lowpass', 'highpass'],
+  'dly.time': [3, ...SD_DLY_DIVS.map(x => x[0])], 'dly.pp': [true, false]
+};
+function sdDefaults() { const p = {}; for (const [k, d] of Object.entries(SDP)) p[k] = d.d; for (const [k, v] of Object.entries(SDE)) p[k] = v[0]; return p; }
+const sdClone = o => JSON.parse(JSON.stringify(o));
+/* make a recipe from a file or a saved scene safe to use */
+function sdSanitize(rec) {
+  if (!rec || typeof rec !== 'object' || !SD_TYPES[rec.type]) return null;
+  const p = sdDefaults(), src = rec.patch || {};
+  for (const [k, d] of Object.entries(SDP)) if (typeof src[k] === 'number' && isFinite(src[k])) p[k] = clamp(src[k], d.min, d.max);
+  for (const [k, v] of Object.entries(SDE)) if (v.includes(src[k])) p[k] = src[k];
+  const len = rec.len && (rec.len.u === 'b' || rec.len.u === 's') && rec.len.n > 0 ? { u: rec.len.u, n: clamp(+rec.len.n, 0.25, 120) } : { u: 'b', n: 2 };
+  const notes = (Array.isArray(rec.notes) ? rec.notes : []).slice(0, 4000).filter(n => n && isFinite(n.s) && isFinite(n.d) && Array.isArray(n.n))
+    .map(n => ({ s: Math.max(0, +n.s), d: clamp(+n.d, 0.05, 4096), v: clamp(isFinite(n.v) ? +n.v : 0.8, 0, 1), n: n.n.filter(isFinite).slice(0, 8).map(m => clamp(Math.round(m), 0, 127)) }))
+    .filter(n => n.n.length);
+  return { v: 1, type: rec.type, name: String(rec.name || SD_TYPES[rec.type].name).slice(0, 40), seed: (rec.seed >>> 0) || 1,
+    len, bpm: clamp(+rec.bpm || 124, 20, 300), bpb: clamp(Math.round(+rec.bpb || 4), 1, 16), loop: rec.loop !== false,
+    root: clamp(Math.round(+rec.root || 0), 0, 11), scale: SD_SCALES[rec.scale] ? rec.scale : 'dorian', notes, patch: p };
+}
+const sdStepSec = rec => 60 / rec.bpm / 4;
+const sdLen = rec => clamp(rec.len.u === 'b' ? rec.len.n * rec.bpb * 60 / rec.bpm : rec.len.n, 0.05, 120);
+const sdSteps = rec => sdLen(rec) / sdStepSec(rec);
+const sdKeyName = rec => SD_NN[rec.root] + ' ' + SD_SCALES[rec.scale].name.toLowerCase();
+const sdLenName = rec => rec.len.u === 'b' ? (SD_LENS.find(x => x[0] === 'b:' + rec.len.n) || [0, rec.len.n + ' bars'])[1] : rec.len.n + ' s';
+
+/* ---------- generators: microhouse-flavoured note patterns and patches ---------- */
+const pick = (r, a) => a[Math.floor(r() * a.length)];
+const rr = (r, a, b) => a + r() * (b - a);
+/* an onset pattern: a motif of motifLen steps drawn from per-16th weights, repeated, with small variations */
+function sdRhythm(r, steps, motifLen, w, minHits, density = 1) {
+  motifLen = Math.max(1, Math.min(steps, motifLen));
+  let motif = [];
+  for (let tries = 0; tries < 6 && motif.length < Math.min(minHits, motifLen); tries++) {
+    motif = [];
+    for (let i = 0; i < motifLen; i++) if (r() < Math.min(0.97, w[i % w.length] * density)) motif.push(i);
+  }
+  if (!motif.length) motif = [0];
+  const out = [];
+  for (let base = 0; base < steps; base += motifLen) {
+    const last = base + motifLen >= steps && base > 0;
+    for (const i of motif) { const s = base + i; if (s >= steps) break; if (last && r() < 0.18) continue; out.push(s); }
+    if (last && r() < 0.35) { const s = base + Math.floor(r() * motifLen); if (s < steps && !out.includes(s)) out.push(s); }
+  }
+  return out.sort((a, b) => a - b);
+}
+function sdGenerate(o) {
+  const seed = (o.seed >>> 0) || (Math.random() * 4294967295 >>> 0) || 1, r = rng(seed);
+  const rec = { v: 1, type: o.type, seed, len: o.len, bpm: o.bpm, bpb: o.bpb, loop: o.loop, notes: [], patch: sdDefaults() };
+  const scales = { chord: ['dorian', 'minor', 'dorian'], melody: ['dorian', 'pent', 'minor', 'phrygian'], bass: ['dorian', 'minor', 'pent'], drone: ['dorian', 'minor', 'phrygian'] }[o.type] || ['dorian', 'minor'];
+  rec.root = o.root === 'auto' ? pick(r, [9, 2, 4, 5, 7, 0, 11]) : +o.root;
+  rec.scale = o.scale === 'auto' ? pick(r, scales) : o.scale;
+  SD_GEN[o.type](rec, r);
+  rec.name = SD_TYPES[o.type].name + (['click', 'hats', 'texture'].includes(o.type) ? '' : ' ' + SD_NN[rec.root] + (rec.scale === 'phrygian' ? ' phryg' : 'm'));
+  return rec;
+}
+function sdDeg(rec, i, base) { const sc = SD_SCALES[rec.scale].s, n = sc.length; return base + rec.root + Math.floor(i / n) * 12 + sc[mod(i, n)]; }
+/* a chord stacked in scale thirds from degree d, folded into lo..hi */
+function sdChord(rec, d, count, lo, hi, r) {
+  const notes = [];
+  for (let k = 0; k < count; k++) { if (k === 2 && count > 4 && r() < 0.5) continue; let m = sdDeg(rec, d + k * 2, 48); while (m > hi) m -= 12; while (m < lo) m += 12; if (!notes.includes(m)) notes.push(m); }
+  return notes.sort((a, b) => a - b);
+}
+const SD_GEN = {
+  chord(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
+    const prog = steps <= spb ? [0] : pick(r, [[0], [0, 3], [0, -1], [0, 4], [0, 2], [0, 3, -1, 0], [0, 0, 3, 4]]);
+    const chordSteps = Math.max(spb, Math.floor(steps / prog.length / spb) * spb), count = pick(r, [4, 5, 5, 6]);
+    const hits = sdRhythm(r, steps, Math.min(steps, spb * (r() < 0.6 ? 1 : 2)), [0.12, 0.25, 0.75, 0.3], 2, rr(r, 0.8, 1.2));
+    const dur = pick(r, [1, 1.5, 2, 2, 3]);
+    for (const s of hits) {
+      const deg = prog[Math.min(prog.length - 1, Math.floor(s / chordSteps)) % prog.length];
+      rec.notes.push({ s, d: dur, v: s % spb === 0 ? 1 : rr(r, 0.65, 0.95), n: sdChord(rec, deg, count, 52, 76, r) });
+    }
+    Object.assign(P, { 'o1.wave': 'sawtooth', 'o2.wave': pick(r, ['square', 'sawtooth']), 'o2.fine': rr(r, 6, 13), 'o2.lvl': 0.5, width: rr(r, 0.35, 0.65),
+      'vcf.type': 'lowpass', 'vcf.cut': rr(r, 450, 1300), 'vcf.res': rr(r, 0.2, 0.5), 'vcf.kt': 0.3, 'vcf.env': rr(r, 1.8, 3.6),
+      'fe.a': 0.001, 'fe.d': rr(r, 0.07, 0.26), 'fe.s': 0, 'fe.r': 0.12, 'ae.a': 0.002, 'ae.d': rr(r, 0.2, 0.45), 'ae.s': rr(r, 0.05, 0.25), 'ae.r': rr(r, 0.08, 0.2),
+      'dly.mix': rr(r, 0.28, 0.5), 'dly.time': pick(r, [3, 3, 6, 2]), 'dly.fb': rr(r, 0.4, 0.62), 'dly.tone': rr(r, 1500, 3200), 'dly.pp': true,
+      drive: rr(r, 0.05, 0.3), 'lfo1.dest': 'cutoff', 'lfo1.wave': pick(r, ['sine', 'triangle', 'drift']), 'lfo1.div': pick(r, [32, 64]), 'lfo1.depth': rr(r, 0.05, 0.18),
+      swing: rr(r, 0.1, 0.22) });
+    if (r() < 0.35) Object.assign(P, { 'ef.on': true, 'ef.mode': 'bandpass', 'ef.base': rr(r, 250, 600), 'ef.range': rr(r, 1.8, 3.2), 'ef.sens': rr(r, 0.5, 0.8), 'ef.q': rr(r, 2.5, 6), 'ef.mix': rr(r, 0.5, 0.8) });
+  },
+  melody(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
+    const hits = sdRhythm(r, steps, Math.min(steps, spb * (r() < 0.5 ? 1 : 2)), [0.28, 0.16, 0.38, 0.22], 3, rr(r, 0.7, 1.15));
+    const n = SD_SCALES[rec.scale].s.length; let deg = Math.floor(r() * n), motifNotes = new Map();
+    for (const s of hits) {
+      const k = s % (spb * 2);
+      if (!motifNotes.has(k) || r() < 0.2) { deg = clamp(deg + pick(r, [-2, -1, -1, 1, 1, 2, 3, -3, 0]), -2, n * 2); motifNotes.set(k, deg); }
+      rec.notes.push({ s, d: pick(r, [0.5, 1, 1, 1.5]), v: rr(r, 0.55, 1), n: [sdDeg(rec, motifNotes.get(k), 72)] });
+    }
+    const ratio = pick(r, [[1, 0], [2, 0], [1, 7], [3, 0], [0, 5]]);
+    Object.assign(P, { 'o1.wave': pick(r, ['sine', 'triangle']), 'o1.lvl': 0.9, 'o2.wave': 'sine', 'o2.oct': ratio[0], 'o2.semi': ratio[1], 'o2.fine': 0, 'o2.lvl': 0,
+      fm: rr(r, 0.8, 3.5), width: 0, scatter: rr(r, 0.2, 0.5),
+      'vcf.type': 'lowpass', 'vcf.cut': rr(r, 2500, 7000), 'vcf.res': 0.1, 'vcf.kt': 0.5, 'vcf.env': 1, 'fe.d': 0.15, 'fe.s': 0,
+      'ae.a': 0.001, 'ae.d': rr(r, 0.1, 0.32), 'ae.s': 0, 'ae.r': 0.08, 'vca.vel': 0.7,
+      'dly.mix': rr(r, 0.3, 0.55), 'dly.time': pick(r, [3, 3, 2, 6]), 'dly.fb': rr(r, 0.4, 0.6), 'dly.tone': rr(r, 2000, 5000), 'dly.pp': true,
+      'lfo1.dest': 'fm', 'lfo1.wave': pick(r, ['sine', 'drift', 'sh']), 'lfo1.div': pick(r, [8, 16, 32]), 'lfo1.depth': rr(r, 0.05, 0.25),
+      swing: rr(r, 0.1, 0.2) });
+  },
+  bass(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
+    const hits = sdRhythm(r, steps, Math.min(steps, spb * (r() < 0.6 ? 1 : 2)), [0.12, 0.12, 0.85, 0.28], 2, rr(r, 0.8, 1.2));
+    const degs = [0, 0, 0, 0, 4, -3, 7, 2, 5];
+    for (const s of hits) rec.notes.push({ s, d: pick(r, [1, 1, 1.5, 2, 3]), v: s % 4 === 2 ? 1 : rr(r, 0.6, 0.9), n: [sdDeg(rec, pick(r, degs), 36)] });
+    Object.assign(P, { 'o1.wave': pick(r, ['sine', 'triangle', 'triangle']), 'o1.lvl': 0.9, 'o2.wave': pick(r, ['triangle', 'square']), 'o2.fine': rr(r, 2, 6), 'o2.lvl': rr(r, 0.1, 0.3),
+      sub: rr(r, 0.2, 0.5), width: 0, 'vcf.type': 'lowpass', 'vcf.cut': rr(r, 220, 600), 'vcf.res': rr(r, 0.15, 0.45), 'vcf.kt': 0.5, 'vcf.env': rr(r, 1, 2.4),
+      'fe.d': rr(r, 0.06, 0.18), 'fe.s': 0, 'ae.a': 0.003, 'ae.d': rr(r, 0.15, 0.35), 'ae.s': rr(r, 0.3, 0.6), 'ae.r': 0.05,
+      'pe.amt': pick(r, [0, 0, 3, 5, 7]), 'pe.dec': rr(r, 0.015, 0.05), drive: rr(r, 0.1, 0.35), swing: rr(r, 0.1, 0.2) });
+  },
+  drone(rec, r) {
+    const steps = sdSteps(rec), L = sdLen(rec), P = rec.patch, two = steps >= rec.bpb * 4 * 4 && r() < 0.45;
+    const degA = 0, degB = pick(r, [3, -1, 2, 4]);
+    const mk = deg => sdChord(rec, deg, pick(r, [4, 5]), 40, 64, r).concat(r() < 0.6 ? [sdDeg(rec, deg, 36)] : []);
+    if (two) { rec.notes.push({ s: 0, d: steps / 2, v: 0.9, n: mk(degA) }); rec.notes.push({ s: steps / 2, d: steps / 2, v: 0.9, n: mk(degB) }); }
+    else rec.notes.push({ s: 0, d: steps, v: 0.9, n: mk(degA) });
+    const seg = two ? L / 2 : L;
+    Object.assign(P, { 'o1.wave': 'sawtooth', 'o1.lvl': 0.55, 'o2.wave': pick(r, ['sawtooth', 'triangle']), 'o2.fine': rr(r, 7, 15), 'o2.lvl': 0.55, sub: rr(r, 0, 0.3),
+      noise: rr(r, 0, 0.06), ncol: 3000, width: rr(r, 0.6, 0.9), 'vcf.type': 'lowpass', 'vcf.cut': rr(r, 320, 900), 'vcf.res': rr(r, 0.2, 0.45), 'vcf.kt': 0.2,
+      'vcf.env': rr(r, 0.3, 1), 'fe.a': Math.min(3, seg * 0.35), 'fe.d': Math.min(4, seg * 0.3), 'fe.s': 0.5, 'fe.r': Math.min(3, seg * 0.3),
+      'ae.a': Math.min(2.5, seg * 0.25), 'ae.d': 1, 'ae.s': 1, 'ae.r': Math.min(3, seg * 0.3), 'vca.vel': 0,
+      'lfo1.dest': 'cutoff', 'lfo1.wave': pick(r, ['sine', 'drift']), 'lfo1.div': pick(r, [32, 64, 128]), 'lfo1.depth': rr(r, 0.12, 0.3),
+      'lfo2.dest': 'pan', 'lfo2.wave': 'sine', 'lfo2.div': pick(r, [16, 32]), 'lfo2.depth': rr(r, 0.15, 0.4),
+      'dly.mix': rr(r, 0.08, 0.2), 'dly.time': 8, 'dly.fb': 0.5, 'dly.tone': 2000, swing: 0 });
+  },
+  click(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
+    const hits = sdRhythm(r, steps, Math.min(steps, spb * (r() < 0.5 ? 1 : 2)), [0.3, 0.45, 0.45, 0.55], 4, rr(r, 0.7, 1.2));
+    for (const s of hits) rec.notes.push({ s, d: 0.25, v: s % 4 === 2 || r() < 0.2 ? 1 : rr(r, 0.25, 0.75), n: [60] });
+    Object.assign(P, { 'o1.lvl': 0, 'o2.lvl': 0, noise: 1, ncol: 18000, width: 0, scatter: rr(r, 0.5, 0.85),
+      'vcf.type': 'bandpass', 'vcf.cut': rr(r, 2500, 7000), 'vcf.res': rr(r, 0.65, 0.92), 'vcf.kt': 0, 'vcf.env': 0, 'vcf.rnd': rr(r, 0.8, 1.8),
+      'ae.a': 0.001, 'ae.d': rr(r, 0.005, 0.025), 'ae.s': 0, 'ae.r': 0.006, 'vca.vel': 0.8,
+      'dly.mix': pick(r, [0, 0, 0.12, 0.2]), 'dly.time': pick(r, [1, 3]), 'dly.fb': 0.25, 'dly.tone': 8000, drive: rr(r, 0, 0.3), swing: rr(r, 0.12, 0.22) });
+  },
+  perc(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
+    const hits = sdRhythm(r, steps, Math.min(steps, spb * (r() < 0.5 ? 1 : 2)), [0.22, 0.3, 0.45, 0.35], 3, rr(r, 0.75, 1.15));
+    const pitches = [sdDeg(rec, 0, 48), sdDeg(rec, pick(r, [2, 4]), 48), sdDeg(rec, pick(r, [5, 7]), 48)].map(m => m + pick(r, [0, 12]));
+    for (const s of hits) rec.notes.push({ s, d: 0.5, v: s % 4 === 0 ? 1 : rr(r, 0.45, 0.9), n: [pick(r, pitches)] });
+    Object.assign(P, { 'o1.wave': pick(r, ['sine', 'triangle']), 'o1.lvl': 0.9, 'o2.wave': 'square', 'o2.semi': pick(r, [7, 12, 5]), 'o2.lvl': rr(r, 0, 0.12), width: 0,
+      noise: rr(r, 0.1, 0.35), ncol: rr(r, 3000, 9000), scatter: rr(r, 0.2, 0.55),
+      'vcf.type': pick(r, ['lowpass', 'bandpass']), 'vcf.cut': rr(r, 900, 3200), 'vcf.res': rr(r, 0.2, 0.5), 'vcf.kt': 0.8, 'vcf.env': rr(r, 0.8, 2), 'fe.d': 0.04, 'fe.s': 0,
+      'ae.a': 0.001, 'ae.d': rr(r, 0.05, 0.2), 'ae.s': 0, 'ae.r': 0.04, 'pe.amt': rr(r, 7, 24), 'pe.dec': rr(r, 0.008, 0.04),
+      'dly.mix': pick(r, [0, 0.1, 0.2]), 'dly.time': 3, 'dly.fb': 0.3, 'dly.tone': 3000, swing: rr(r, 0.1, 0.2) });
+  },
+  hats(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
+    const hits = sdRhythm(r, steps, Math.min(steps, spb), [0.12, 0.35, 0.95, 0.4], 2, rr(r, 0.8, 1.15));
+    for (const s of hits) { const off = s % 4 === 2, open = off && r() < 0.12; rec.notes.push({ s, d: open ? 1.5 : 0.25, v: off ? rr(r, 0.85, 1) : rr(r, 0.25, 0.55), n: [72] }); }
+    Object.assign(P, { 'o1.wave': 'square', 'o1.oct': 2, 'o1.lvl': rr(r, 0, 0.15), 'o2.wave': 'square', 'o2.oct': 2, 'o2.semi': 6, 'o2.lvl': 0, fm: rr(r, 0, 2), width: 0,
+      noise: 1, ncol: 18000, scatter: rr(r, 0.1, 0.3),
+      'vcf.type': 'highpass', 'vcf.cut': rr(r, 5000, 9500), 'vcf.res': rr(r, 0.1, 0.35), 'vcf.kt': 0, 'vcf.env': 0,
+      'ae.a': 0.001, 'ae.d': rr(r, 0.02, 0.06), 'ae.s': rr(r, 0.12, 0.25), 'ae.r': rr(r, 0.015, 0.04), 'vca.vel': 0.8,
+      swing: rr(r, 0.14, 0.26) });
+  },
+  texture(rec, r) {
+    const steps = sdSteps(rec), L = sdLen(rec), P = rec.patch;
+    rec.notes.push({ s: 0, d: steps, v: 1, n: [60] });
+    Object.assign(P, { 'o1.lvl': 0, 'o2.lvl': 0, noise: 1, ncol: rr(r, 5000, 16000), width: 0,
+      'vcf.type': pick(r, ['bandpass', 'lowpass', 'highpass']), 'vcf.cut': rr(r, 900, 4500), 'vcf.res': rr(r, 0.15, 0.5), 'vcf.kt': 0, 'vcf.env': 0,
+      'ae.a': Math.min(1, L * 0.15), 'ae.d': 1, 'ae.s': 1, 'ae.r': Math.min(1.5, L * 0.2), 'vca.vel': 0,
+      'lfo1.dest': 'cutoff', 'lfo1.wave': 'drift', 'lfo1.div': pick(r, [8, 16, 32]), 'lfo1.depth': rr(r, 0.2, 0.45),
+      'lfo2.dest': 'amp', 'lfo2.wave': 'sh', 'lfo2.div': pick(r, [0.5, 1]), 'lfo2.depth': rr(r, 0.2, 0.7),
+      'dly.mix': rr(r, 0.1, 0.3), 'dly.time': 3, 'dly.fb': 0.4, 'dly.tone': 4000, swing: 0 });
+    if (r() < 0.5) Object.assign(P, { 'ef.on': true, 'ef.mode': 'bandpass', 'ef.base': rr(r, 400, 1500), 'ef.range': rr(r, 1.5, 3), 'ef.sens': rr(r, 0.6, 0.9), 'ef.q': rr(r, 3, 8), 'ef.mix': 0.6 });
+  }
+};
+/* keep the notes and fit them to a new length: tile when it grows, cut when it shrinks */
+function sdFitNotes(rec, oldSteps) {
+  const steps = sdSteps(rec), held = ['drone', 'texture'].includes(rec.type);
+  if (held) { const k = steps / oldSteps; rec.notes = rec.notes.map(n => Object.assign({}, n, { s: n.s * k, d: n.d * k })); return; }
+  const src = rec.notes.filter(n => n.s < oldSteps), out = [];
+  for (let base = 0; base < steps; base += oldSteps) for (const n of src) if (base + n.s < steps) out.push(Object.assign({}, n, { s: base + n.s }));
+  rec.notes = out;
+}
+
+/* ---------- render ---------- */
+function sdEnvCurve(a, d, s, dur, rel, peak, base) {
+  a = Math.max(0.001, a); const tot = dur + rel, n = Math.max(3, Math.ceil(tot * 1000) + 1), c = new Float32Array(n);
+  const lv = t => t < a ? t / a : s + (1 - s) * Math.exp(-4 * (t - a) / Math.max(d, 1e-4));
+  const l0 = lv(dur);
+  for (let i = 0; i < n; i++) { const t = i / (n - 1) * tot; const v = t <= dur ? lv(t) : l0 * Math.pow(Math.max(0, 1 - (t - dur) / rel), 2); c[i] = base + peak * v; }
+  c[n - 1] = base;
+  return c;
+}
+function sdLfoBuffer(oc, wave, hz, L, r) {
+  const sr = 4000, n = Math.max(2, Math.ceil(L * sr) + 2), b = oc.createBuffer(1, n, sr), d = b.getChannelData(0);
+  let held = r() * 2 - 1, prev = held, next = r() * 2 - 1, lastCyc = 0;
+  for (let i = 0; i < n; i++) {
+    const ph = i / sr * hz, f = ph - Math.floor(ph), cyc = Math.floor(ph);
+    if (cyc !== lastCyc) { lastCyc = cyc; held = r() * 2 - 1; prev = next; next = r() * 2 - 1; }
+    switch (wave) {
+      case 'sine': d[i] = Math.sin(2 * Math.PI * f); break;
+      case 'triangle': d[i] = 1 - 4 * Math.abs(f - 0.5); break;
+      case 'square': d[i] = f < 0.5 ? 1 : -1; break;
+      case 'saw': d[i] = 1 - 2 * f; break;
+      case 'ramp': d[i] = 2 * f - 1; break;
+      case 'sh': d[i] = held; break;
+      default: d[i] = prev + (next - prev) * (0.5 - 0.5 * Math.cos(Math.PI * f));   // drift: smoothed random
+    }
+  }
+  return b;
+}
+function sdNoiseBuf(oc, r) {
+  const n = Math.round(oc.sampleRate * 2), b = oc.createBuffer(2, n, oc.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < n; i++) d[i] = r() * 2 - 1; }
+  return b;
+}
+const sdQ = (type, res) => type === 'lowpass' || type === 'highpass' ? res * 22 : 0.7 * Math.pow(40, res);
+async function sdRender(rec) {
+  const P = rec.patch, L = sdLen(rec), stepS = sdStepSec(rec), N = Math.max(64, Math.round(L * SR));
+  const oc = new OfflineAudioContext(2, N, SR), r = rng((rec.seed ^ 0x5bd1e995) >>> 0);
+  const fade = rec.loop ? clamp(L * 0.06, 0.012, 0.5) : 0, end = rec.loop ? L - fade : Infinity;
+  const bus = oc.createGain(), trem = oc.createGain(), bpan = oc.createStereoPanner();
+  bus.connect(trem); trem.connect(bpan); bpan.connect(oc.destination);
+  // LFOs: each feeds a summing node per destination, already scaled to that destination's units
+  const lfo = {}; let ampDepth = 0;
+  for (const k of ['lfo1', 'lfo2']) {
+    const dest = P[k + '.dest'], depth = P[k + '.depth']; if (dest === 'off' || depth <= 0.0005) continue;
+    const hz = P[k + '.sync'] ? 1 / (P[k + '.div'] * stepS) : P[k + '.hz'];
+    const src = oc.createBufferSource(); src.buffer = sdLfoBuffer(oc, P[k + '.wave'], hz, L, r);
+    const g = oc.createGain();
+    g.gain.value = { pitch: depth * 1200, cutoff: depth * 4800, amp: depth / 2, pan: depth, fm: depth * 4 }[dest];
+    if (dest === 'amp') ampDepth += depth / 2;
+    src.connect(g); src.start(0);
+    if (!lfo[dest]) lfo[dest] = oc.createGain();
+    g.connect(lfo[dest]);
+  }
+  trem.gain.value = Math.max(0, 1 - ampDepth);
+  if (lfo.amp) lfo.amp.connect(trem.gain);
+  if (lfo.pan) lfo.pan.connect(bpan.pan);
+  const NB = (P.noise > 0.001) ? sdNoiseBuf(oc, r) : null;
+  const ft = P['vcf.type'], q = sdQ(ft, P['vcf.res']), w = P.width, peAmt = P['pe.amt'];
+  function voice(m, t, dur, rel, amp, pan, cutR) {
+    const f0 = mtof(m), tot = dur + rel, stopAt = t + tot + 0.02;
+    const mix = oc.createGain(), filt = oc.createBiquadFilter(), vca = oc.createGain();
+    filt.type = ft; filt.Q.value = q;
+    filt.frequency.value = clamp(P['vcf.cut'] * Math.pow(2, P['vcf.kt'] * (m - 60) / 12) * cutR, 20, 20000);
+    if (Math.abs(P['vcf.env']) > 0.01) filt.detune.setValueCurveAtTime(sdEnvCurve(P['fe.a'], P['fe.d'], P['fe.s'], dur, P['fe.r'], 1200 * P['vcf.env'], 0), t, dur + P['fe.r']);
+    if (lfo.cutoff) lfo.cutoff.connect(filt.detune);
+    vca.gain.value = 0; vca.gain.setValueCurveAtTime(sdEnvCurve(P['ae.a'], P['ae.d'], P['ae.s'], dur, rel, amp, 0), t, tot);
+    mix.connect(filt); filt.connect(vca);
+    if (Math.abs(pan) > 0.001) { const p = oc.createStereoPanner(); p.pan.value = pan; vca.connect(p); p.connect(bus); } else vca.connect(bus);
+    const pitchOsc = (o, fine) => {
+      if (Math.abs(peAmt) > 0.05) { const span = Math.min(tot, P['pe.dec'] * 6), n = Math.max(3, Math.ceil(span * 2000)), c = new Float32Array(n);
+        for (let i = 0; i < n; i++) c[i] = fine + peAmt * 100 * Math.exp(-(i / (n - 1) * span) / (P['pe.dec'] / 3));
+        c[n - 1] = fine; o.detune.setValueCurveAtTime(c, t, span); }
+      else o.detune.value = fine;
+      if (lfo.pitch) lfo.pitch.connect(o.detune);
+      o.start(t); o.stop(stopAt);
+    };
+    const toMix = (node, lvl, side) => {
+      const g = oc.createGain(); g.gain.value = lvl; node.connect(g);
+      if (side && w > 0.001) { const p = oc.createStereoPanner(); p.pan.value = side * w; g.connect(p); p.connect(mix); } else g.connect(mix);
+    };
+    let o1 = null;
+    const f1 = f0 * Math.pow(2, P['o1.oct']);
+    if (P['o1.lvl'] > 0.001) { o1 = oc.createOscillator(); o1.type = P['o1.wave']; o1.frequency.value = f1; toMix(o1, P['o1.lvl'], -1); pitchOsc(o1, P['o1.fine']); }
+    if (P['o2.lvl'] > 0.001 || (o1 && P.fm > 0.001)) {
+      const o2 = oc.createOscillator(); o2.type = P['o2.wave']; o2.frequency.value = f0 * Math.pow(2, P['o2.oct'] + P['o2.semi'] / 12);
+      if (P['o2.lvl'] > 0.001) toMix(o2, P['o2.lvl'], 1);
+      if (o1 && P.fm > 0.001) {
+        const fg = oc.createGain(); fg.gain.value = P.fm * f1; o2.connect(fg); fg.connect(o1.frequency);
+        if (lfo.fm) { const s = oc.createGain(); s.gain.value = f1; lfo.fm.connect(s); s.connect(fg.gain); }
+      }
+      pitchOsc(o2, P['o2.fine']);
+    }
+    if (P.sub > 0.001) { const s = oc.createOscillator(); s.type = 'sine'; s.frequency.value = f1 / 2; toMix(s, P.sub, 0); pitchOsc(s, 0); }
+    if (NB) {
+      const s = oc.createBufferSource(), lp = oc.createBiquadFilter(); s.buffer = NB; s.loop = true; lp.type = 'lowpass'; lp.frequency.value = P.ncol;
+      s.connect(lp); toMix(lp, P.noise, 0); s.start(t, r() * 1.9); s.stop(stopAt);
+    }
+  }
+  for (const nt of rec.notes) {
+    let t = nt.s * stepS; const st = Math.round(nt.s);
+    if (Math.abs(nt.s - st) < 1e-6 && st % 2 === 1) t += P.swing * stepS;
+    const pan = (r() * 2 - 1) * P.scatter, cutR = Math.pow(2, (r() * 2 - 1) * P['vcf.rnd']);
+    if (t >= L) continue;
+    let dur = Math.max(0.003, nt.d * stepS * P.gate), rel = P['ae.r'];
+    if (rec.loop) {
+      const avail = end - t; if (avail < 0.006) continue;
+      if (dur + rel > avail) { rel = Math.min(rel, avail * 0.5); dur = Math.max(0.002, Math.min(dur, avail - rel)); }
+    }
+    const amp = P['vca.lvl'] * (1 - P['vca.vel'] * (1 - nt.v));
+    for (const m of nt.n) voice(clamp(m + P.trans, 0, 127), t, dur, rel, amp, pan, cutR);
+  }
+  const buf = await oc.startRendering();
+  sdPost(buf, rec, fade);
+  return buf;
+}
+function sdPeak(chs) { let pk = 0; for (const d of chs) for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > pk) pk = a; } return pk; }
+function sdScale(chs, k) { for (const d of chs) for (let i = 0; i < d.length; i++) d[i] *= k; }
+/* the parts that run sample by sample: envelope filter, drive, delay, level and the loop ending */
+function sdPost(buf, rec, fade) {
+  const P = rec.patch, sr = buf.sampleRate, Ld = buf.getChannelData(0), Rd = buf.getChannelData(1), n = Ld.length, chs = [Ld, Rd];
+  const pk0 = sdPeak(chs); if (pk0 < 1e-7) return;
+  sdScale(chs, 0.8 / pk0);
+  if (P['ef.on']) {      // envelope filter: a follower on the input sweeps a resonant state-variable filter
+    const aA = 1 - Math.exp(-1 / (P['ef.att'] * sr)), aR = 1 - Math.exp(-1 / (P['ef.rel'] * sr)), k = 1 / P['ef.q'], sens = 0.5 + P['ef.sens'] * 7;
+    const base = P['ef.base'], range = P['ef.range'], mix = P['ef.mix'], mode = P['ef.mode'];
+    let env = 0, a1 = 0, a2 = 0, a3 = 0; const ic = [0, 0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      const x = (Math.abs(Ld[i]) + Math.abs(Rd[i])) * 0.5; env += (x > env ? aA : aR) * (x - env);
+      if ((i & 15) === 0) { const fc = clamp(base * Math.pow(2, range * Math.min(1, env * sens)), 20, sr * 0.45), g = Math.tan(Math.PI * fc / sr); a1 = 1 / (1 + g * (g + k)); a2 = g * a1; a3 = g * a2; }
+      for (let c = 0; c < 2; c++) {
+        const d = chs[c], v0 = d[i], j = c * 2, v3 = v0 - ic[j + 1], v1 = a1 * ic[j] + a2 * v3, v2 = ic[j + 1] + a2 * ic[j] + a3 * v3;
+        ic[j] = 2 * v1 - ic[j]; ic[j + 1] = 2 * v2 - ic[j + 1];
+        const y = mode === 'lowpass' ? v2 : mode === 'highpass' ? v0 - k * v1 - v2 : k * v1;
+        d[i] = v0 * (1 - mix) + y * mix;
+      }
+    }
+  }
+  if (P.drive > 0.001) { const kk = 1 + P.drive * 10, nk = 1 / Math.tanh(kk); for (const d of chs) for (let i = 0; i < n; i++) d[i] = Math.tanh(d[i] * kk) * nk; }
+  if (P['dly.mix'] > 0.001) {
+    const dS = Math.max(1, Math.round(P['dly.time'] * sdStepSec(rec) * sr)), bL = new Float32Array(dS), bR = new Float32Array(dS);
+    const fb = P['dly.fb'], mix = P['dly.mix'], pp = P['dly.pp'], ta = 1 - Math.exp(-2 * Math.PI * P['dly.tone'] / sr);
+    let lpL = 0, lpR = 0, j = 0;
+    for (let i = 0; i < n; i++) {
+      const dl = bL[j], dr = bR[j]; let inL, inR;
+      if (pp) { inL = (Ld[i] + Rd[i]) * 0.5 + dr * fb; inR = dl * fb; } else { inL = Ld[i] + dl * fb; inR = Rd[i] + dr * fb; }
+      lpL += ta * (inL - lpL); lpR += ta * (inR - lpR); bL[j] = lpL; bR[j] = lpR;
+      Ld[i] += dl * mix; Rd[i] += dr * mix;
+      if (++j === dS) j = 0;
+    }
+  }
+  const pk = sdPeak(chs); if (pk > 1e-7) sdScale(chs, 0.7 / pk);
+  if (rec.loop) {        // bring everything to silence before the loop point
+    const fn = Math.min(n, Math.round(fade * sr)), z = Math.min(n, 32);
+    for (let i = 0; i < fn; i++) { const g = 0.5 + 0.5 * Math.cos(Math.PI * (i + 1) / fn), at = n - fn + i; Ld[at] *= g; Rd[at] *= g; }
+    for (let i = n - z; i < n; i++) { Ld[i] = 0; Rd[i] = 0; }
+  }
+}
+
+/* ---------- the Sound Design tab ---------- */
+const SD = { rec: null, buf: null, editId: null, busy: false, again: false, timer: 0, aud: null, pots: [], binds: [], visited: false };
+function sdOpts() {
+  const [u, n] = $('#sdLen').value.split(':');
+  return { type: $('#sdType').value, len: { u, n: +n }, bpm: clamp(+$('#sdBpm').value || 124, 20, 300), bpb: P.bpb, loop: $('#sdEnd [aria-pressed="true"]').dataset.v === 'loop',
+    root: $('#sdKey').value, scale: $('#sdScale').value };
+}
+function sdStatus(msg) { $('#sdStatus').textContent = msg || ''; }
+async function sdGenerateNow() {
+  SD.rec = sdGenerate(sdOpts()); SD.editId = null;
+  await sdRerender(); sdSyncAll();
+}
+function sdDirty() { clearTimeout(SD.timer); SD.timer = setTimeout(sdRerender, 140); }
+async function sdRerender() {
+  if (!SD.rec) return;
+  if (SD.busy) { SD.again = true; return; }
+  SD.busy = true; sdStatus('Rendering…');
+  try {
+    do { SD.again = false; await new Promise(r => setTimeout(r, 0)); SD.buf = await sdRender(SD.rec); } while (SD.again);
+    sdDrawWave(); sdSwapAudition(); sdStatus('');
+  } catch (e) { sdStatus('Couldn’t render that sound.'); console.error(e); }
+  finally { SD.busy = false; sdSyncBench(); }
+}
+function sdSet(key, v) { if (!SD.rec) return; SD.rec.patch[key] = v; sdDirty(); }
+
+/* waveform and note view */
+function sdDrawWave() {
+  const cv = $('#sdWave'); sizeCanvas(cv); const W = cv.width, H = cv.height; if (!W) return;
+  const c = cv.getContext('2d'), dpr = window.devicePixelRatio || 1; c.clearRect(0, 0, W, H);
+  const rec = SD.rec, b = SD.buf; if (!rec || !b) return;
+  const L = b.duration, beat = 60 / rec.bpm;
+  for (let k = 0, t = 0; t < L - 1e-6; t = ++k * beat) {
+    const x = Math.round(t / L * W) + 0.5, bar = k % rec.bpb === 0;
+    c.fillStyle = bar ? COL.line : COL['grid-faint']; c.fillRect(x, 0, dpr, H);
+    if (bar) { c.fillStyle = COL.muted; c.font = `${9 * dpr}px monospace`; c.fillText(String(k / rec.bpb + 1), x + 3 * dpr, 10 * dpr); }
+  }
+  if (rec.loop) { const fx = (sdLen(rec) - clamp(sdLen(rec) * 0.06, 0.012, 0.5)) / L * W; c.fillStyle = COL['clip-fill']; c.fillRect(fx, 0, W - fx, H); }
+  const d0 = b.getChannelData(0), d1 = b.getChannelData(1), n = d0.length, per = n / W, mid = H / 2, amp = H / 2 - 4 * dpr;
+  c.fillStyle = COL['oxide-hi'];
+  for (let x = 0; x < W; x++) {
+    let mn = 0, mx = 0; const a = Math.floor(x * per), e = Math.min(n, Math.floor((x + 1) * per)), stride = Math.max(1, Math.floor((e - a) / 64));
+    for (let i = a; i < e; i += stride) { const v = (d0[i] + d1[i]) * 0.5; if (v < mn) mn = v; if (v > mx) mx = v; }
+    c.fillRect(x, mid - mx * amp, 1, Math.max(1, (mx - mn) * amp));
+  }
+  sdDrawRoll();
+}
+function sdDrawRoll() {
+  const cv = $('#sdRoll'); if (!cv || cv.closest('details:not([open])')) return;
+  sizeCanvas(cv); const W = cv.width, H = cv.height; if (!W) return;
+  const c = cv.getContext('2d'), dpr = window.devicePixelRatio || 1, rec = SD.rec; c.clearRect(0, 0, W, H); if (!rec) return;
+  const steps = sdSteps(rec), all = rec.notes.flatMap(n => n.n);
+  if (!all.length) return;
+  let lo = Math.min(...all) - 2, hi = Math.max(...all) + 2; if (hi - lo < 14) { const m = (hi + lo) / 2; lo = m - 7; hi = m + 7; }
+  for (let s = 0; s < steps; s += 4) { const x = Math.round(s / steps * W) + 0.5; c.fillStyle = s % (rec.bpb * 4) === 0 ? COL.line : COL['grid-faint']; c.fillRect(x, 0, dpr, H); }
+  const rowH = H / (hi - lo + 1);
+  for (const nt of rec.notes) for (const m of nt.n) {
+    const x = nt.s / steps * W, w = Math.max(2 * dpr, nt.d * rec.patch.gate / steps * W), y = (hi - m) * rowH;
+    c.globalAlpha = 0.45 + 0.55 * nt.v; c.fillStyle = COL.teal; c.fillRect(x, y, Math.min(w, W - x), Math.max(2 * dpr, rowH - dpr));
+  }
+  c.globalAlpha = 1;
+}
+
+/* audition: loops the rendered sound through the master, in time with the deck when it is playing */
+function sdStopAudition() {
+  const a = SD.aud; SD.aud = null;
+  if (a && AC) { a.g.gain.setTargetAtTime(0, AC.currentTime, 0.01); try { a.src.stop(AC.currentTime + 0.08); } catch (e) {} }
+  $('#sdAud').textContent = '▶ Audition'; $('#sdAud').setAttribute('aria-pressed', 'false'); $('#sdHead').hidden = true;
+}
+function sdStartAt(buf, phase) {
+  const src = AC.createBufferSource(), g = AC.createGain(), now = AC.currentTime + 0.02;
+  src.buffer = buf; src.loop = true; g.gain.setValueAtTime(0, now); g.gain.linearRampToValueAtTime(1, now + 0.01);
+  src.connect(g); g.connect(MASTER.gain); src.start(now, mod(phase, buf.duration));
+  return { src, g, t0: now - mod(phase, buf.duration), dur: buf.duration };
+}
+async function sdAudition() {
+  if (SD.aud) { sdStopAudition(); return; }
+  if (!SD.buf) return;
+  ensureAudio(); try { await AC.resume(); } catch (e) {}
+  const ph = S.playing ? (AC.currentTime + 0.02 - S.t0) : 0;
+  SD.aud = sdStartAt(SD.buf, ph);
+  $('#sdAud').textContent = '■ Stop'; $('#sdAud').setAttribute('aria-pressed', 'true'); $('#sdHead').hidden = false;
+}
+function sdSwapAudition() {
+  if (!SD.aud || !AC) return;
+  const old = SD.aud, ph = (AC.currentTime + 0.02 - old.t0);
+  SD.aud = sdStartAt(SD.buf, S.playing ? (AC.currentTime + 0.02 - S.t0) : ph);
+  old.g.gain.setTargetAtTime(0, AC.currentTime + 0.02, 0.008); try { old.src.stop(AC.currentTime + 0.1); } catch (e) {}
+}
+function sdFrame() {
+  if (!SD.aud || !AC) return;
+  $('#sdHead').style.left = (mod(AC.currentTime - SD.aud.t0, SD.aud.dur) / SD.aud.dur * 100) + '%';
+}
+
+/* deck hand-off */
+const sdNoteFor = rec => clamp((rec.type === 'bass' ? 36 : rec.type === 'drone' ? 48 : 60) + rec.root, 0, 127);
+function sdEditTape() { return SD.editId != null ? S.tapes.find(t => t.id === SD.editId) : null; }
+function sdAddToDeck() {
+  if (!SD.buf || !SD.rec) return;
+  SD.rec.name = ($('#sdName').value || SD.rec.name).slice(0, 40);
+  const t = createTape({ name: SD.rec.name, clip: SD.buf, srcType: 'audio/wav', srcName: SD.rec.name + '.wav', mode: 'loop', note: sdNoteFor(SD.rec), sd: SD.rec, p: { vol: -6 } });
+  renumber();
+  SD.editId = t.id; sdSyncBench();
+  toast(`Added “${t.name}” to the deck as tape ${String(S.tapes.indexOf(t) + 1).padStart(2, '0')}.`);
+}
+function sdUpdateTape() {
+  const t = sdEditTape(); if (!t || !SD.buf) return sdAddToDeck();
+  SD.rec.name = ($('#sdName').value || SD.rec.name).slice(0, 40);
+  stopAudition(t);
+  t.src = SD.buf; t.clip = SD.buf; t.trimIn = 0; t.trimOut = SD.buf.duration; t.fadeIn = 0; t.fadeOut = 0; t._clipDirty = false;
+  t.srcBytes = null; t.srcType = 'audio/wav'; t.srcName = SD.rec.name + '.wav'; t.mode = 'loop'; t.sd = sdClone(SD.rec);
+  rebuild(t); drawTrimWave(t); updateTrimUI(t); if (t.ui.sdBtn) t.ui.sdBtn.hidden = false;
+  toast(`Updated tape ${String(S.tapes.indexOf(t) + 1).padStart(2, '0')}, “${t.name}”.`);
+}
+function sdOpenTape(t) {
+  const rec = sdSanitize(t.sd); if (!rec) { toast('This tape has no sound design recipe.'); return; }
+  sdStopAudition();
+  SD.rec = rec; SD.editId = t.id;
+  showTab('sound'); sdSyncAll(); sdRerender();
+}
+
+/* UI: generator controls, bench, modules */
+function sdDisp(k, v) {
+  const sg = x => (x > 0 ? '+' : '') + x;
+  switch (k) {
+    case 'pct': return [String(Math.round(v * 100)), '%'];
+    case 'hz': return v >= 1000 ? [(v / 1000).toFixed(v >= 10000 ? 1 : 2), 'kHz'] : [v < 10 ? v.toFixed(2) : String(Math.round(v)), 'Hz'];
+    case 'time': return v < 1 ? [String(v < 0.01 ? +(v * 1000).toFixed(1) : Math.round(v * 1000)), 'ms'] : [v.toFixed(2), 's'];
+    case 'st': return [sg(Math.round(v)), 'st'];
+    case 'ct': return [sg(Math.round(v)), 'ct'];
+    case 'oct': return [Number.isInteger(v) ? sg(v) : sg(+v.toFixed(1)), 'oct'];
+    case 'x': return [v.toFixed(2), '×'];
+    case 'q': return [v.toFixed(1), ''];
+  }
+  return [String(v), ''];
+}
+function sdParse(k, str) {
+  const s = String(str).trim().toLowerCase();
+  if (k === 'time') return parseFadeTime(/[a-z]/.test(s) ? s : s + 'ms');
+  let x = parseFloat(s.replace(/[^0-9.+\-]/g, '')); if (isNaN(x)) return NaN;
+  if (k === 'hz' && /k/.test(s)) x *= 1000;
+  if (k === 'pct') x /= 100;
+  return x;
+}
+function sdPot(key, label) {
+  const d = SDP[key];
+  const norm = d.scale === 'log' ? v => Math.log(v / d.min) / Math.log(d.max / d.min) : d.scale === 'sq' ? v => Math.sqrt((v - d.min) / (d.max - d.min)) : v => (v - d.min) / (d.max - d.min);
+  const denorm = d.scale === 'log' ? n => d.min * Math.pow(d.max / d.min, n) : d.scale === 'sq' ? n => d.min + n * n * (d.max - d.min) : n => d.min + n * (d.max - d.min);
+  const pot = potEl({ name: label || d.l, label: label || d.l, get: () => SD.rec ? SD.rec.patch[key] : d.d,
+    set: v => { if (!SD.rec || !isFinite(v)) return; v = clamp(d.step ? Math.round(v / d.step) * d.step : v, d.min, d.max); SD.rec.patch[key] = v; pot.render(); sdDirty(); if (key === 'gate' || key === 'trans') sdDrawRoll(); },
+    norm, denorm, dflt: d.d, step: d.step, bip: d.min < 0 && d.max > 0, disp: v => sdDisp(d.k, v), parse: x => sdParse(d.k, x),
+    disabled: () => !SD.rec }, 'col');
+  SD.pots.push(pot);
+  return pot.el;
+}
+function sdSeg(key, opts) {
+  const el = h('div', { class: 'seg', role: 'group' });
+  for (const [v, l] of opts) el.append(h('button', { 'data-v': String(v), 'aria-pressed': 'false', onclick: () => { if (!SD.rec) return; SD.rec.patch[key] = v; sync(); sdDirty(); } }, l));
+  const sync = () => { for (const b of el.children) b.setAttribute('aria-pressed', String(!!SD.rec && String(SD.rec.patch[key]) === b.dataset.v)); };
+  SD.binds.push(sync); return el;
+}
+function sdSelect(key, opts, label) {
+  const el = h('select', { class: 'sel', 'aria-label': label }, ...opts.map(([v, l]) => h('option', { value: String(v) }, l)));
+  el.addEventListener('change', () => { if (!SD.rec) return; const o = opts.find(x => String(x[0]) === el.value); SD.rec.patch[key] = o[0]; sdDirty(); sdSyncAll(); });
+  SD.binds.push(() => { if (SD.rec) el.value = String(SD.rec.patch[key]); });
+  return el;
+}
+function sdTog(key, text) {
+  const el = h('button', { class: 'tog', 'aria-pressed': 'false', onclick: () => { if (!SD.rec) return; SD.rec.patch[key] = !SD.rec.patch[key]; sdSyncAll(); sdDirty(); } }, text);
+  SD.binds.push(() => el.setAttribute('aria-pressed', String(!!SD.rec && !!SD.rec.patch[key])));
+  return el;
+}
+const sdField = (label, el) => h('div', { class: 'field' }, h('span', { class: 'lbl' }, label), el);
+function sdModule(title, sub, ...kids) {
+  return h('section', { class: 'mod' }, h('header', {}, h('h3', {}, title), sub ? h('span', { class: 'tape-meta' }, sub) : null), ...kids);
+}
+function sdLfoModule(k, n) {
+  const rate = h('div', { class: 'knobs' });
+  const divSel = sdSelect(k + '.div', SD_DIVS, `LFO ${n} rate`);
+  const hzPot = sdPot(k + '.hz');
+  const syncBtn = h('button', { class: 'tog', 'aria-pressed': 'true', onclick: () => { if (!SD.rec) return; SD.rec.patch[k + '.sync'] = !SD.rec.patch[k + '.sync']; sdSyncAll(); sdDirty(); } }, 'Tempo sync');
+  SD.binds.push(() => { const on = !SD.rec || SD.rec.patch[k + '.sync']; syncBtn.setAttribute('aria-pressed', String(on)); divSel.parentNode.hidden = !on; hzPot.hidden = on; });
+  rate.append(sdField('Rate', divSel), hzPot, sdPot(k + '.depth'));
+  return sdModule(`LFO ${n}`, 'modulation',
+    h('div', { class: 'knobs' }, sdField('Shape', sdSelect(k + '.wave', SD_LFO_WAVES, `LFO ${n} shape`)), sdField('To', sdSelect(k + '.dest', SD_LFO_DESTS, `LFO ${n} destination`)), syncBtn),
+    rate);
+}
+function sdBuild() {
+  const lenSel = $('#sdLen');
+  lenSel.append(h('optgroup', { label: 'Bars' }, ...SD_LENS.filter(x => x[0][0] === 'b').map(([v, l]) => h('option', { value: v }, l))),
+    h('optgroup', { label: 'Time' }, ...SD_LENS.filter(x => x[0][0] === 's').map(([v, l]) => h('option', { value: v }, l))));
+  lenSel.value = 'b:2';
+  $('#sdType').append(...Object.entries(SD_TYPES).map(([k, t]) => h('option', { value: k }, t.name)));
+  $('#sdKey').append(h('option', { value: 'auto' }, 'Any key'), ...SD_NN.map((n, i) => h('option', { value: String(i) }, n)));
+  $('#sdScale').append(h('option', { value: 'auto' }, 'Any mode'), ...Object.entries(SD_SCALES).map(([k, s]) => h('option', { value: k }, s.name)));
+  const typeDesc = () => { $('#sdDesc').textContent = SD_TYPES[$('#sdType').value].desc; };
+  $('#sdType').addEventListener('change', typeDesc); typeDesc();
+  $('#sdGen').addEventListener('click', sdGenerateNow);
+  $('#sdDeckBpm').addEventListener('click', () => { $('#sdBpm').value = String(+P.bpm.toFixed(2)); sdLive(); });
+  for (const b of $$('#sdEnd button')) b.addEventListener('click', () => { for (const x of $$('#sdEnd button')) x.setAttribute('aria-pressed', String(x === b)); sdLive(); });
+  $('#sdBpm').addEventListener('change', sdLive);
+  $('#sdLen').addEventListener('change', sdLive);
+  $('#sdAud').addEventListener('click', sdAudition);
+  $('#sdNotes').addEventListener('click', async () => { if (!SD.rec) return; const t = sdGenerate(Object.assign(sdOpts(), { type: SD.rec.type, root: SD.rec.root, scale: SD.rec.scale, len: SD.rec.len, bpm: SD.rec.bpm, loop: SD.rec.loop })); SD.rec.notes = t.notes; SD.rec.seed = t.seed; await sdRerender(); sdSyncAll(); });
+  $('#sdSound').addEventListener('click', async () => { if (!SD.rec) return; const t = sdGenerate(Object.assign(sdOpts(), { type: SD.rec.type, root: SD.rec.root, scale: SD.rec.scale, len: SD.rec.len, bpm: SD.rec.bpm, loop: SD.rec.loop })); SD.rec.patch = t.patch; await sdRerender(); sdSyncAll(); });
+  $('#sdAdd').addEventListener('click', sdAddToDeck);
+  $('#sdUpdate').addEventListener('click', sdUpdateTape);
+  $('#sdName').addEventListener('input', () => { if (SD.rec) SD.rec.name = $('#sdName').value || SD_TYPES[SD.rec.type].name; });
+  $('#sdDetails').addEventListener('toggle', () => { if ($('#sdDetails').open) sdDrawRoll(); });
+  new ResizeObserver(() => sdDrawWave()).observe($('#sdWaveWrap'));
+
+  const W = SD_WAVES;
+  $('#sdMods').append(
+    sdModule('Sequence', 'notes and timing',
+      h('div', { class: 'rollwrap' }, h('canvas', { id: 'sdRoll', 'aria-label': 'Notes of the current sound' })),
+      h('div', { class: 'knobs' }, sdPot('swing'), sdPot('gate'), sdPot('trans'))),
+    sdModule('VCO 1', 'main oscillator', sdField('Wave', sdSeg('o1.wave', W)), h('div', { class: 'knobs' }, sdPot('o1.oct'), sdPot('o1.fine'), sdPot('o1.lvl'))),
+    sdModule('VCO 2', 'second oscillator · FM source', sdField('Wave', sdSeg('o2.wave', W)), h('div', { class: 'knobs' }, sdPot('o2.oct'), sdPot('o2.semi'), sdPot('o2.fine'), sdPot('o2.lvl'), sdPot('fm'))),
+    sdModule('Sub · noise · space', 'extra sources and stereo', h('div', { class: 'knobs' }, sdPot('sub'), sdPot('noise'), sdPot('ncol'), sdPot('width'), sdPot('scatter'))),
+    sdModule('Pitch envelope', 'drops the pitch into each note', h('div', { class: 'knobs' }, sdPot('pe.amt'), sdPot('pe.dec'))),
+    sdModule('VCF', 'filter', sdField('Type', sdSeg('vcf.type', SD_FILT)), h('div', { class: 'knobs' }, sdPot('vcf.cut'), sdPot('vcf.res'), sdPot('vcf.kt'), sdPot('vcf.env'), sdPot('vcf.rnd'))),
+    sdModule('Filter envelope', 'ADSR → cutoff, scaled by Env amt', h('div', { class: 'knobs' }, sdPot('fe.a'), sdPot('fe.d'), sdPot('fe.s'), sdPot('fe.r'))),
+    sdModule('VCA', 'amp envelope and level', h('div', { class: 'knobs' }, sdPot('ae.a'), sdPot('ae.d'), sdPot('ae.s'), sdPot('ae.r'), sdPot('vca.lvl'), sdPot('vca.vel'))),
+    sdLfoModule('lfo1', 1), sdLfoModule('lfo2', 2),
+    sdModule('Envelope filter', 'follows the loudness, sweeps a resonant filter',
+      h('div', { class: 'knobs' }, sdTog('ef.on', 'On'), sdField('Mode', sdSeg('ef.mode', [['bandpass', 'BP'], ['lowpass', 'LP'], ['highpass', 'HP']]))),
+      h('div', { class: 'knobs' }, sdPot('ef.base'), sdPot('ef.range'), sdPot('ef.sens'), sdPot('ef.q'), sdPot('ef.att'), sdPot('ef.rel'), sdPot('ef.mix'))),
+    sdModule('Drive · echo', 'saturation and a tempo-synced delay',
+      h('div', { class: 'knobs' }, sdField('Time', sdSelect('dly.time', SD_DLY_DIVS, 'Echo time')), sdTog('dly.pp', 'Ping-pong')),
+      h('div', { class: 'knobs' }, sdPot('drive'), sdPot('dly.mix'), sdPot('dly.fb'), sdPot('dly.tone')))
+  );
+}
+/* Ending, length and tempo change the sound in front of you; the rest waits for Generate */
+function sdLive() {
+  if (!SD.rec) return;
+  const o = sdOpts(), oldSteps = sdSteps(SD.rec);
+  const lenChanged = o.len.u !== SD.rec.len.u || o.len.n !== SD.rec.len.n;
+  SD.rec.loop = o.loop; SD.rec.bpm = o.bpm; SD.rec.len = o.len;
+  if (lenChanged || Math.abs(sdSteps(SD.rec) - oldSteps) > 1e-6) sdFitNotes(SD.rec, oldSteps);
+  sdDirty(); sdSyncBench();
+}
+function sdSyncBench() {
+  const rec = SD.rec, t = sdEditTape();
+  for (const id of ['sdAud', 'sdNotes', 'sdSound', 'sdAdd']) $('#' + id).disabled = !rec;
+  $('#sdEmpty').hidden = !!rec;
+  if (!rec) { $('#sdMeta').textContent = ''; return; }
+  if (document.activeElement !== $('#sdName')) $('#sdName').value = rec.name;
+  const L = sdLen(rec);
+  $('#sdMeta').textContent = `${SD_TYPES[rec.type].name} · ${sdLenName(rec)} · ${+rec.bpm.toFixed(2)} bpm · ${L.toFixed(2)} s` +
+    (['click', 'hats', 'texture'].includes(rec.type) ? '' : ` · ${sdKeyName(rec)}`) + (rec.loop ? ' · ends in silence' : ' · free running');
+  $('#sdUpdate').hidden = !t; $('#sdAdd').textContent = t ? 'Add as new tape' : 'Add to deck';
+  $('#sdAdd').classList.toggle('primary', !t);
+  if (t) $('#sdUpdate').textContent = `Update tape ${String(S.tapes.indexOf(t) + 1).padStart(2, '0')}`;
+  const tempoOff = rec.len.u === 'b' && S.tapes.length && Math.abs(rec.bpm - P.bpm) > 0.01;
+  $('#sdTempoNote').hidden = !tempoOff;
+  if (tempoOff) $('#sdTempoNote').textContent = `The deck’s grid is ${+P.bpm.toFixed(2)} bpm, so this loop won’t line up with it.`;
+}
+function sdSyncAll() {
+  const rec = SD.rec;
+  if (rec) {
+    $('#sdLen').value = SD_LENS.some(x => x[0] === rec.len.u + ':' + rec.len.n) ? rec.len.u + ':' + rec.len.n : $('#sdLen').value;
+    $('#sdBpm').value = String(+rec.bpm.toFixed(2));
+    for (const b of $$('#sdEnd button')) b.setAttribute('aria-pressed', String((b.dataset.v === 'loop') === rec.loop));
+    $('#sdType').value = rec.type; $('#sdDesc').textContent = SD_TYPES[rec.type].desc;
+  }
+  SD.pots.forEach(p => p.render()); SD.binds.forEach(f => f());
+  sdSyncBench(); sdDrawRoll();
+}
+function sdShown() {
+  if (!SD.visited) { SD.visited = true; $('#sdBpm').value = String(+P.bpm.toFixed(2)); if (!SD.rec) sdGenerateNow(); }
+  requestAnimationFrame(() => { sdDrawWave(); });
+}
+sdBuild(); sdSyncAll();
+
 (async function boot() {
   refreshMixer(); refreshMap();
-  try { const saved = localStorage.getItem('tld-tab'); if (saved === 'mixer') showTab('mixer'); } catch (e) {}
+  try { const saved = localStorage.getItem('tld-tab'); if (saved === 'mixer' || saved === 'sound') showTab(saved); } catch (e) {}
   requestAnimationFrame(frame);
   await refreshSceneList();
   let start = 'b:studio';

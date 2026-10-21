@@ -6,6 +6,7 @@ A virtual tape loop player that runs entirely in the browser (Web Audio API).
 - **Scenes:** built-in sets (Studio demo, Nature, Microhouse, Empty deck), all synthesized in the browser. Save your current set as a named scene and recall it later; saved scenes, audio included, are kept in your browser.
 - **Patterns:** store which tapes play, and their levels, on pads A–H, then switch between them on the next grid line or chain them to change after set counts of bars or seconds. See [Patterns and transitions](#patterns-and-transitions).
 - **Deck Link:** Axis Stack can pick any tape and play a copy of it in time with the deck, through its XY effects. See [Tapes in Axis Stack](#tapes-in-axis-stack).
+- **Sound design:** generate microhouse-flavoured sounds — chord stabs, melodies, basslines, drones, clicks, percussion, hats and textures — at a length in bars or seconds, and add them to the deck. See [Sound design](#sound-design).
 - **Mixer:** a performance console with one strip per tape: gain, 3-band EQ with sweepable mid, an effects bus (tape drive, echo, reverb), tape speed, balance, volume fader, mute and solo.
 - **MIDI:** every major control is mappable. Each strip gets its own MIDI channel with a default CC layout, and MIDI learn remaps anything. Needs a browser with Web MIDI (Chrome, Edge, Opera).
 - **Capture:** record bar-exact clips straight from Logic Rhythm, Boolean Melody Machine, Choir, Pocket Grains, Pocket Mouse and Padfield running in other tabs. See [Capture from apps](#capture-from-apps).
@@ -13,6 +14,17 @@ A virtual tape loop player that runs entirely in the browser (Web Audio API).
 - Dark and light themes.
 
 Nothing is uploaded; all audio stays in your browser.
+
+## Sound design
+
+The **Sound design** tab makes new sounds from scratch with a small modular synth, all rendered in the browser.
+
+- **Generate:** pick a **Sound** (Chord stab, Melody, Bassline, Drone, Clicks, Percussion, Hats & shakers, Texture), a **Length** (¼ bar to 16 bars, or 1 to 30 seconds), a **Key** and mode (or leave them to chance) and a **BPM** (**Deck tempo** copies the pattern grid's), then press **Generate**. The patterns and patches lean towards microhouse: swung 16ths, offbeat accents, minor 7th/9th/11th stabs, dub echoes.
+- **Ending:** **Loop · ends in silence** brings every note, tail and echo down to silence before the loop point, so the sound repeats without a click. **Free running** lets notes and echoes run straight off the end. Ending, Length and BPM also change the current sound in place.
+- **Audition** loops the sound (in time with the deck if it's playing). **Re-roll notes** keeps the sound and writes new notes; **Re-roll sound** keeps the notes and makes a new patch.
+- **Add to deck** puts it on a new tape. Tapes made here have an **Edit sound** button that brings the sound back to this tab, where **Update tape** replaces the tape's audio in place.
+- **Details** opens the full patch: sequence (swing, gate, transpose), VCO 1 and VCO 2 (wave, octave, semitone, fine, level, FM from VCO 2 into VCO 1), sub, noise, stereo width and scatter, a pitch envelope, the VCF (LP/BP/HP/notch, cutoff, resonance, key tracking, envelope amount, per-note random) with its own ADSR, the VCA with its ADSR, level and velocity, two LFOs (seven shapes, tempo-synced or free, to pitch, cutoff, level, pan or FM), an envelope filter (a follower sweeping a resonant filter), drive, and a tempo-synced ping-pong echo. Every change re-renders.
+- The recipe is saved with the tape in projects and saved scenes, so it stays editable.
 
 ## Patterns and transitions
 
