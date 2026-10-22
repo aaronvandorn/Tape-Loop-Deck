@@ -3709,6 +3709,7 @@ const SD_TYPES = {
   mallet:  { name: 'Vibes & mallets', desc: 'Vibraphone and marimba figures: soft struck tones, double-stops and a shimmer of tremolo.' },
   bass:    { name: 'Bassline',       desc: 'A round, rubbery bass that leans on the offbeats, with short notes and a tight filter.' },
   drone:   { name: 'Drone',          desc: 'A long detuned chord that breathes with slow filter and stereo movement.' },
+  orch:    { name: 'Orchestral haze', desc: 'Strings and horns looped and blurred into a fog: slow swells, wide voicings, worn tape, no beat at all.' },
   frags:   { name: 'Fragments',      desc: 'Shards of tone scattered across the register, some held, some clipped — made to be chopped up.' },
   click:   { name: 'Clicks',         desc: 'Tiny resonant ticks and glitches on swung 16ths, scattered across the stereo field.' },
   perc:    { name: 'Percussion',     desc: 'Wood blocks, rims and small toms: pitched bodies with a snap of noise and a pitch drop.' },
@@ -3745,6 +3746,7 @@ const SDP = {
   'fm': { l: 'FM → 1', min: 0, max: 8, d: 0, scale: 'sq', k: 'x' },
   'fm.env': { l: 'FM env', min: 0, max: 10, d: 0, scale: 'sq', k: 'x' },
   'fm.dec': { l: 'FM decay', min: 0.005, max: 3, d: 0.3, scale: 'log', k: 'time' },
+  'ens': { l: 'Unison', min: 0, max: 1, d: 0, k: 'pct' },
   'sub': { l: 'Sub', min: 0, max: 1, d: 0, k: 'pct' },
   'noise': { l: 'Noise', min: 0, max: 1, d: 0, k: 'pct' },
   'ncol': { l: 'Color', min: 200, max: 18000, d: 8000, scale: 'log', k: 'hz' },
@@ -3899,7 +3901,7 @@ function styleSkip(rec, r) {
   if (tonal && rec.type !== 'bass' && rec.type !== 'perc') {
     Object.assign(P, { 'o1.wave': pick(r, ['sine', 'triangle']), 'ae.a': Math.max(P['ae.a'], rr(r, 0.01, 0.08)), 'ae.s': Math.max(P['ae.s'], 0.45),
       'vcf.cut': Math.min(16000, P['vcf.cut'] * 1.6), 'vcf.env': P['vcf.env'] * 0.4 });
-    if (!['drone'].includes(rec.type)) for (const n of rec.notes) n.d *= 2;
+    if (!['drone', 'orch'].includes(rec.type)) for (const n of rec.notes) n.d *= 2;
   }
 }
 function styleWonky(rec, r) {
@@ -3910,7 +3912,7 @@ function styleWonky(rec, r) {
   Object.assign(P, { drive: rr(r, 0.2, 0.5), scatter: Math.max(P.scatter, rr(r, 0.3, 0.7)), chop: rr(r, 0.1, 0.35), 'chop.mode': 'mix', 'chop.div': pick(r, [0.5, 1, 2]),
     'crush.bits': pick(r, [16, 16, 9, 7]), swing: rr(r, 0, 0.3) });
   if (P['lfo2.dest'] === 'off') Object.assign(P, { 'lfo2.dest': tonal ? 'pitch' : 'cutoff', 'lfo2.wave': 'sh', 'lfo2.sync': true, 'lfo2.div': pick(r, [1, 2]), 'lfo2.depth': tonal ? rr(r, 0.01, 0.04) : rr(r, 0.2, 0.5) });
-  if (!['drone', 'texture'].includes(rec.type)) {
+  if (!['drone', 'texture', 'orch'].includes(rec.type)) {
     const out = [];
     for (const n of rec.notes) {
       if (n.d >= 1 && r() < 0.2) { const k = pick(r, [2, 3, 4]); for (let i = 0; i < k; i++) out.push(Object.assign({}, n, { s: n.s + i * n.d / k, d: n.d / k, v: n.v * (1 - i * 0.12) })); }
@@ -3924,7 +3926,7 @@ function sdGenerate(o) {
   const seed = (o.seed >>> 0) || (Math.random() * 4294967295 >>> 0) || 1, r = rng(seed);
   const style = SD_STYLES[o.style] ? o.style : pick(r, SD_STYLE_KEYS), st = SD_STYLES[style];
   const rec = { v: 1, type: o.type, style, seed, len: o.len, bpm: o.bpm, bpb: o.bpb, loop: o.loop, notes: [], patch: sdDefaults() };
-  const scales = st.scales || { chord: ['dorian', 'minor', 'dorian'], keys: ['dorian', 'minor', 'lydian'], melody: ['dorian', 'pent', 'minor', 'phrygian'], mallet: ['dorian', 'mpent', 'pent', 'lydian'], bass: ['dorian', 'minor', 'pent'], drone: ['dorian', 'minor', 'phrygian'], frags: ['lydian', 'dorian', 'pent'] }[o.type] || ['dorian', 'minor'];
+  const scales = st.scales || { chord: ['dorian', 'minor', 'dorian'], keys: ['dorian', 'minor', 'lydian'], melody: ['dorian', 'pent', 'minor', 'phrygian'], mallet: ['dorian', 'mpent', 'pent', 'lydian'], bass: ['dorian', 'minor', 'pent'], drone: ['dorian', 'minor', 'phrygian'], orch: ['minor', 'dorian', 'lydian', 'minor'], frags: ['lydian', 'dorian', 'pent'] }[o.type] || ['dorian', 'minor'];
   rec.root = o.root === 'auto' ? pick(r, [9, 2, 4, 5, 7, 0, 11]) : +o.root;
   rec.scale = o.scale === 'auto' ? pick(r, scales) : o.scale;
   SD_GEN[o.type](rec, r);
@@ -3972,6 +3974,26 @@ const SD_GEN = {
       'ae.a': 0.001, 'ae.d': vibes ? rr(r, 0.8, 1.6) : rr(r, 0.2, 0.45), 'ae.s': 0, 'ae.r': vibes ? 0.4 : 0.1, 'vca.vel': 0.75,
       'dly.mix': rr(r, 0.15, 0.35), 'dly.time': pick(r, [3, 2, 6]), 'dly.fb': rr(r, 0.3, 0.5), 'dly.tone': 3500, swing: rr(r, 0.1, 0.2) });
     if (vibes) Object.assign(P, { 'lfo1.dest': 'amp', 'lfo1.wave': 'sine', 'lfo1.sync': true, 'lfo1.div': pick(r, [2, 3]), 'lfo1.depth': rr(r, 0.2, 0.5) });
+  },
+  orch(rec, r) {
+    const steps = sdSteps(rec), L = sdLen(rec), P = rec.patch, bars = steps / (rec.bpb * 4);
+    const prog = bars < 2 ? [0] : pick(r, bars >= 4 ? [[0], [0, -2], [0, 3], [0, 5], [0, -2, 3, 4], [0, -1, -2, -3], [0, 3, 5, 4]] : [[0], [0, -2], [0, 3], [0, 5]]);
+    const seg = steps / prog.length, segS = L / prog.length;
+    prog.forEach((deg, i) => {
+      const upper = sdChord(rec, deg, pick(r, [4, 5, 5]), 55, 81, r), bass = sdDeg(rec, deg, 36);
+      rec.notes.push({ s: i * seg, d: seg, v: rr(r, 0.75, 1), n: [bass, ...(r() < 0.5 ? [bass + 7] : []), ...upper] });
+    });
+    const brass = r() < 0.35;
+    Object.assign(P, { 'o1.wave': 'sawtooth', 'o1.lvl': 0.7, 'o2.wave': brass ? 'square' : 'sawtooth', 'o2.oct': brass ? -1 : 0, 'o2.fine': rr(r, 5, 11), 'o2.lvl': brass ? rr(r, 0.2, 0.35) : rr(r, 0.3, 0.5),
+      ens: rr(r, 0.5, 0.85), width: rr(r, 0.7, 0.95), sub: rr(r, 0, 0.15), noise: rr(r, 0.02, 0.06), ncol: 4000,
+      'vcf.type': 'lowpass', 'vcf.cut': rr(r, 650, 1500), 'vcf.res': rr(r, 0.08, 0.2), 'vcf.kt': 0.3, 'vcf.env': rr(r, 0.8, 1.6),
+      'fe.a': Math.min(3, segS * 0.4), 'fe.d': Math.min(4, segS * 0.3), 'fe.s': 0.6, 'fe.r': Math.min(3, segS * 0.3),
+      'ae.a': Math.min(2.5, segS * 0.35), 'ae.d': 1, 'ae.s': 1, 'ae.r': Math.min(3, segS * 0.4), 'vca.vel': 0.3,
+      'lfo1.dest': 'pitch', 'lfo1.wave': 'sine', 'lfo1.sync': false, 'lfo1.hz': rr(r, 4.5, 5.6), 'lfo1.depth': rr(r, 0.004, 0.008),
+      'lfo2.dest': 'cutoff', 'lfo2.wave': 'drift', 'lfo2.sync': true, 'lfo2.div': pick(r, [32, 64]), 'lfo2.depth': rr(r, 0.1, 0.2),
+      muffle: rr(r, 1800, 4000), wow: rr(r, 0.2, 0.45), 'wow.hz': rr(r, 0.2, 0.5), flutter: rr(r, 0.1, 0.2), vinyl: rr(r, 0.05, 0.2),
+      chop: rr(r, 0.15, 0.35), 'chop.mode': 'stutter', 'chop.div': pick(r, [4, 8]), drive: rr(r, 0.05, 0.15),
+      'dly.mix': rr(r, 0.05, 0.15), 'dly.time': 8, 'dly.fb': 0.5, 'dly.tone': 1500, swing: 0, scatter: 0 });
   },
   frags(rec, r) {
     const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
@@ -4089,7 +4111,7 @@ const SD_GEN = {
 };
 /* keep the notes and fit them to a new length: tile when it grows, cut when it shrinks */
 function sdFitNotes(rec, oldSteps) {
-  const steps = sdSteps(rec), held = ['drone', 'texture'].includes(rec.type);
+  const steps = sdSteps(rec), held = ['drone', 'texture', 'orch'].includes(rec.type);
   if (held) { const k = steps / oldSteps; rec.notes = rec.notes.map(n => Object.assign({}, n, { s: n.s * k, d: n.d * k })); return; }
   const src = rec.notes.filter(n => n.s < oldSteps), out = [];
   for (let base = 0; base < steps; base += oldSteps) for (const n of src) if (base + n.s < steps) out.push(Object.assign({}, n, { s: base + n.s }));
@@ -4175,19 +4197,28 @@ async function sdRender(rec) {
       const g = oc.createGain(); g.gain.value = lvl; node.connect(g);
       if (side && w > 0.001) { const p = oc.createStereoPanner(); p.pan.value = side * w; g.connect(p); p.connect(mix); } else g.connect(mix);
     };
-    let o1 = null;
-    const f1 = f0 * Math.pow(2, P['o1.oct']);
-    if (P['o1.lvl'] > 0.001) { o1 = oc.createOscillator(); o1.type = P['o1.wave']; o1.frequency.value = f1; toMix(o1, P['o1.lvl'], -1); pitchOsc(o1, P['o1.fine']); }
-    if (P['o2.lvl'] > 0.001 || (o1 && fmOn)) {
-      const o2 = oc.createOscillator(); o2.type = P['o2.wave']; o2.frequency.value = f0 * Math.pow(2, P['o2.oct'] + P['o2.semi'] / 12);
-      if (P['o2.lvl'] > 0.001) toMix(o2, P['o2.lvl'], 1);
-      if (o1 && fmOn) {
-        const fg = oc.createGain(); fg.gain.value = P.fm * f1; o2.connect(fg); fg.connect(o1.frequency);
-        if (P['fm.env'] > 0.001) fg.gain.setValueCurveAtTime(sdEnvCurve(0.001, P['fm.dec'], 0, dur, rel, P['fm.env'] * f1, P.fm * f1), t, tot);
-        if (lfo.fm) { const s = oc.createGain(); s.gain.value = f1; lfo.fm.connect(s); s.connect(fg.gain); }
-      }
-      pitchOsc(o2, P['o2.fine']);
+    // unison: up to five detuned copies of each oscillator, spread across the stereo field
+    const uN = P.ens > 0.001 ? 1 + Math.round(P.ens * 4) : 1, uDet = (i, n) => n === 1 ? 0 : (i / (n - 1) * 2 - 1) * P.ens * 24;
+    const uSide = (i, n, base) => n === 1 ? base : clamp(base * 0.5 + (i / (n - 1) * 2 - 1), -1, 1);
+    const f1 = f0 * Math.pow(2, P['o1.oct']), o1s = [];
+    if (P['o1.lvl'] > 0.001) for (let i = 0; i < uN; i++) {
+      const o = oc.createOscillator(); o.type = P['o1.wave']; o.frequency.value = f1; toMix(o, P['o1.lvl'] / Math.sqrt(uN), uSide(i, uN, -1)); o1s.push([o, uDet(i, uN)]);
     }
+    const o1 = o1s.length ? o1s[0][0] : null;
+    if (P['o2.lvl'] > 0.001 || (o1 && fmOn)) {
+      const n2 = o1 && fmOn ? 1 : uN, f2 = f0 * Math.pow(2, P['o2.oct'] + P['o2.semi'] / 12);
+      for (let i = 0; i < n2; i++) {
+        const o2 = oc.createOscillator(); o2.type = P['o2.wave']; o2.frequency.value = f2;
+        if (P['o2.lvl'] > 0.001) toMix(o2, P['o2.lvl'] / Math.sqrt(n2), uSide(i, n2, 1));
+        if (o1 && fmOn) {
+          const fg = oc.createGain(); fg.gain.value = P.fm * f1; o2.connect(fg); for (const [o] of o1s) fg.connect(o.frequency);
+          if (P['fm.env'] > 0.001) fg.gain.setValueCurveAtTime(sdEnvCurve(0.001, P['fm.dec'], 0, dur, rel, P['fm.env'] * f1, P.fm * f1), t, tot);
+          if (lfo.fm) { const s = oc.createGain(); s.gain.value = f1; lfo.fm.connect(s); s.connect(fg.gain); }
+        }
+        pitchOsc(o2, P['o2.fine'] + uDet(i, n2));
+      }
+    }
+    for (const [o, det] of o1s) pitchOsc(o, P['o1.fine'] + det);
     if (P.sub > 0.001) { const s = oc.createOscillator(); s.type = 'sine'; s.frequency.value = f1 / 2; toMix(s, P.sub, 0); pitchOsc(s, 0); }
     if (NB) {
       const s = oc.createBufferSource(), lp = oc.createBiquadFilter(); s.buffer = NB; s.loop = true; lp.type = 'lowpass'; lp.frequency.value = P.ncol;
@@ -4546,7 +4577,7 @@ function sdBuild() {
     sdModule('Sequence', 'notes and timing',
       h('div', { class: 'rollwrap' }, h('canvas', { id: 'sdRoll', 'aria-label': 'Notes of the current sound' })),
       h('div', { class: 'knobs' }, sdPot('swing'), sdPot('gate'), sdPot('trans'))),
-    sdModule('VCO 1', 'main oscillator', sdField('Wave', sdSeg('o1.wave', W)), h('div', { class: 'knobs' }, sdPot('o1.oct'), sdPot('o1.fine'), sdPot('o1.lvl'))),
+    sdModule('VCO 1', 'main oscillator · unison applies to both', sdField('Wave', sdSeg('o1.wave', W)), h('div', { class: 'knobs' }, sdPot('o1.oct'), sdPot('o1.fine'), sdPot('o1.lvl'), sdPot('ens'))),
     sdModule('VCO 2', 'second oscillator · FM source', sdField('Wave', sdSeg('o2.wave', W)), h('div', { class: 'knobs' }, sdPot('o2.oct'), sdPot('o2.semi'), sdPot('o2.fine'), sdPot('o2.lvl'), sdPot('fm'), sdPot('fm.env'), sdPot('fm.dec'))),
     sdModule('Sub · noise · space', 'extra sources and stereo', h('div', { class: 'knobs' }, sdPot('sub'), sdPot('noise'), sdPot('ncol'), sdPot('width'), sdPot('scatter'))),
     sdModule('Pitch envelope', 'drops the pitch into each note', h('div', { class: 'knobs' }, sdPot('pe.amt'), sdPot('pe.dec'), sdPot('pe.rnd'))),
