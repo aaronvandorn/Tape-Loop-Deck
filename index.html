@@ -122,6 +122,7 @@ select.sel{background:var(--well);border:1px solid var(--line);border-radius:4px
 .tape-name{background:transparent;border:0;border-bottom:1px solid transparent;font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.03em;padding:0 2px;min-width:0;flex:1 1 160px;max-width:420px}
 .tape-name:hover,.tape-name:focus{border-bottom-color:var(--line);outline:none}
 .tape-meta{color:var(--muted);font-size:13px}
+.tape-keep{color:var(--oxide-hi)}
 .tape-acts{display:flex;gap:6px;margin-left:auto}
 .deckrow{display:grid;grid-template-columns:190px minmax(0,1fr);gap:14px;align-items:stretch}
 .reels{width:190px;height:108px;background:var(--well);border:1px solid var(--line);border-radius:5px;display:block}
@@ -3080,8 +3081,8 @@ onThemeChange();
    When Discobot (https://iw978599.github.io/discobot/) shows this page in a frame, the deck is a
    unit in its rack: Discobot starts and stops the tapes on its beat, takes the mix into its mixer,
    and keeps the deck's settings with its project. Tapes run at their own speeds, so Discobot's tempo
-   changes leave them alone. Settings travel without the audio (Discobot keeps at most 100,000
-   characters per guest), and are put back onto loaded tapes with the same names.
+   changes leave them alone. Settings hold no audio (Discobot keeps at most 100,000 characters per
+   guest); the tapes' audio is kept by Discobot as files the settings name (see "Tapes' audio").
    Nothing here is active unless the page is framed and Discobot has said hello.
    Protocol: https://github.com/iw978599/discobot/blob/main/docs/GUEST_PROTOCOL.md */
 var GUEST_FRAMED = (() => { try { return window.parent !== window; } catch (e) { return true; } })();
@@ -3155,21 +3156,30 @@ function guestStopTap() {
   G.tap = null; G.tapCtx = null;
 }
 
-/* settings: everything but the audio */
+/* settings: everything but the audio. Each tape names its audio instead: by the ids of the files
+   Discobot keeps for it (see "Tapes' audio" below), by a built-in scene's tape, or, until the files
+   are kept, by a token that only this page load knows. */
 function guestCapture() {
   if (!G.booted && G.pending) return G.pending;   // not set up yet: hand back what Discobot gave us
+  const at = new Map(S.tapes.map((t, i) => [t.id, i]));
   return {
-    app: 'tape-loop-deck', version: 1, audioIncluded: false,
+    app: 'tape-loop-deck', version: 2, audioIncluded: false,
     name: $('#projName').value, snap: S.snap, master: { vol: S.master.vol },
     scene: S.scene && S.scene.startsWith('b:') ? S.scene : null,
     mxOn: S.mxOn, mxLvl: S.mxLvl,
     matrix: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number), A = S.tapes.find(t => t.id === a), B = S.tapes.find(t => t.id === b); return A && B ? { from: A.name, to: B.name, db } : null; }).filter(Boolean),
-    tapes: S.tapes.map(t => ({ name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh, trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, p: Object.assign({}, t.p) }))
+    mxi: Object.entries(S.mx).map(([k, db]) => { const [a, b] = k.split('>').map(Number); return at.has(a) && at.has(b) ? [at.get(a), at.get(b), db] : null; }).filter(Boolean),
+    tapes: S.tapes.map(gfCaptureTape)
   };
 }
 function guestApply(st) {
   if (!st || typeof st !== 'object' || Array.isArray(st)) return;
   if (!G.booted) { G.pending = st; return; }
+  if (typeof st.version === 'number' && st.version >= 2 && G.on) { gfApply(st); return; }
+  guestApplyV1(st);
+}
+// Settings from before the deck kept its audio with Discobot: put back onto loaded tapes with the same names.
+function guestApplyV1(st) {
   // a built-in scene can be rebuilt here, so Discobot only needs its name, not the audio
   if (typeof st.scene === 'string' && st.scene.startsWith('b:') && SCENES[st.scene.slice(2)] && S.scene !== st.scene && !st._sceneLoaded) {
     loadScene(st.scene, { announce: false }).then(ok => guestApply(Object.assign({}, st, { _sceneLoaded: true, scene: ok ? st.scene : null })));
@@ -3227,6 +3237,393 @@ function guestApply(st) {
   if (missing) toast(`Discobot restored settings for ${applied} tape${applied === 1 ? '' : 's'}. Add the audio for the other ${missing}; Discobot keeps settings, not sound.`);
 }
 
+/* ---- Tapes' audio, kept with the Discobot project ----
+   Discobot's optional "files" feature: the deck hands each tape's audio to Discobot (putFile), gets
+   back an id per file, and names the tape's audio by those ids in its settings. Given settings again
+   (a reload, another scene, a project file), it asks for the files it does not have (getFile).
+   Original file bytes are sent as they are when they fit in one file; anything else is 16-bit WAV
+   at the audio's own rate, in parts of at most 8 MB, put back together sample for sample.
+   A project shared by link or opened on another device comes without the files: those tapes keep
+   their place and settings and say their recording is missing. All of this only while hosted. */
+const GF_MAX = 8 * 1024 * 1024, GF_RE = /^discobot-file:[0-9a-f]{64}$/;
+Object.assign(G, {
+  req: new Map(), reqN: 0,          // questions waiting for an answer, by id
+  rec: new WeakMap(),               // audio buffer → { status: 'pending'|'kept'|'failed', files, enc, error }
+  bufs: new Map(),                  // files key → { buf, meta } once decoded, or { promise } while on the way
+  tokOf: new WeakMap(), tokSrc: new Map(),
+  hold: null,                       // the silent stand-in for a tape whose audio is missing or on its way
+  sweepAt: Infinity, changeSoon: 0
+});
+function gfHold() {
+  if (!G.hold) G.hold = new AudioBuffer({ numberOfChannels: 1, length: SR, sampleRate: SR });
+  return G.hold;
+}
+const gfIsHold = src => !!G.hold && src === G.hold;
+function gfTok(src) {
+  let tok = G.tokOf.get(src);
+  if (!tok) { tok = 'tld-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); G.tokOf.set(src, tok); G.tokSrc.set(tok, src); }
+  return tok;
+}
+// A built-in scene's tape is rebuilt here, so it is named by scene and place, not kept as a file.
+function gfBuiltin(src) {
+  for (const [k, sc] of Object.entries(SCENES)) {
+    const tp = sc.cache && Array.isArray(sc.cache.tapes) ? sc.cache.tapes : null;
+    const i = tp ? tp.findIndex(sp => sp.clip === src) : -1;
+    if (i >= 0) return k + ':' + i;
+  }
+  return null;
+}
+function gfBuiltinGet(ref) {   // → a buffer, a promise of one, or null
+  const m = /^(\w+):(\d+)$/.exec(ref), sc = m && Object.prototype.hasOwnProperty.call(SCENES, m[1]) ? SCENES[m[1]] : null;
+  if (!sc) return null;
+  const pick = d => (d && Array.isArray(d.tapes) && d.tapes[+m[2]] && d.tapes[+m[2]].clip) || null;
+  if (sc.cache) return pick(sc.cache);
+  if (!sc._gfBuild) sc._gfBuild = Promise.resolve().then(() => sc.build()).then(d => (sc.cache = sc.cache || d)).catch(() => null);
+  return sc._gfBuild.then(pick);
+}
+const gfFilesOf = pt => Array.isArray(pt.files) && pt.files.length && pt.files.length <= 64 && pt.files.every(f => typeof f === 'string' && GF_RE.test(f)) ? pt.files.slice()
+  : typeof pt.file === 'string' && GF_RE.test(pt.file) ? [pt.file] : null;
+function gfKeysOf(pt) {
+  const k = [], f = gfFilesOf(pt);
+  if (f) k.push('f:' + f.join(' '));
+  if (typeof pt.builtin === 'string') k.push('b:' + pt.builtin);
+  if (typeof pt.tok === 'string') k.push('t:' + pt.tok);
+  return k;
+}
+function gfTapeKeys(t) {
+  if (gfIsHold(t.src)) return t._gf ? gfKeysOf(t._gf.pt) : [];
+  const k = [], r = G.rec.get(t.src), b = gfBuiltin(t.src), tok = G.tokOf.get(t.src);
+  if (r && r.files) k.push('f:' + r.files.join(' '));
+  if (b) k.push('b:' + b);
+  if (tok) k.push('t:' + tok);
+  return k;
+}
+
+function gfAsk(msg, transfer) {   // → the answer, or null if none comes
+  const id = 'tld-' + (++G.reqN);
+  return new Promise(res => {
+    const timer = setTimeout(() => { G.req.delete(id); res(null); }, 60000);
+    G.req.set(id, m => { clearTimeout(timer); res(m); });
+    msg.id = id;
+    guestSend(msg, transfer);
+  });
+}
+function gfAnswer(m) {
+  if (typeof m.id !== 'string') return;
+  const f = G.req.get(m.id);
+  if (f) { G.req.delete(m.id); f(m); }
+}
+function gfChanged() {   // settings now name new files: have Discobot save them soon
+  if (G.changeSoon) return;
+  G.changeSoon = setTimeout(() => { G.changeSoon = 0; if (G.on) guestSend({ type: 'stateChanged' }); }, 250);
+}
+
+/* encoding: 16-bit PCM WAV, mono or stereo as the audio is */
+function gfWav(buf, a, b) {
+  const nc = Math.min(2, buf.numberOfChannels), n = b - a, bytes = n * nc * 2, sr = buf.sampleRate;
+  const ab = new ArrayBuffer(44 + bytes), v = new DataView(ab);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, 'RIFF'); v.setUint32(4, 36 + bytes, true); ws(8, 'WAVE'); ws(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, nc, true); v.setUint32(24, sr, true); v.setUint32(28, sr * nc * 2, true); v.setUint16(32, nc * 2, true); v.setUint16(34, 16, true);
+  ws(36, 'data'); v.setUint32(40, bytes, true);
+  const ch = []; for (let c = 0; c < nc; c++) ch.push(buf.getChannelData(c));
+  let o = 44;
+  for (let i = a; i < b; i++) for (let c = 0; c < nc; c++) { const x = ch[c][i]; v.setInt16(o, Math.round((x > 1 ? 1 : x < -1 ? -1 : x) * 32767), true); o += 2; }
+  return ab;
+}
+function gfParseWav(ab) {   // our own WAV parts back into samples, without resampling; null if not one
+  try {
+    const v = new DataView(ab), tag = o => String.fromCharCode(v.getUint8(o), v.getUint8(o + 1), v.getUint8(o + 2), v.getUint8(o + 3));
+    if (ab.byteLength < 44 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return null;
+    let o = 12, fmt = null;
+    while (o + 8 <= ab.byteLength) {
+      const id = tag(o), len = v.getUint32(o + 4, true), body = o + 8;
+      if (id === 'fmt ') fmt = { pcm: v.getUint16(body, true), nc: v.getUint16(body + 2, true), sr: v.getUint32(body + 4, true), bits: v.getUint16(body + 14, true) };
+      else if (id === 'data') {
+        if (!fmt || fmt.pcm !== 1 || fmt.bits !== 16 || fmt.nc < 1 || fmt.nc > 2 || fmt.sr < 3000 || fmt.sr > 768000) return null;
+        const n = Math.floor(Math.min(len, ab.byteLength - body) / (fmt.nc * 2));
+        if (n < 1) return null;
+        const out = new AudioBuffer({ numberOfChannels: fmt.nc, length: n, sampleRate: fmt.sr }), ch = [];
+        for (let c = 0; c < fmt.nc; c++) ch.push(out.getChannelData(c));
+        let p = body;
+        for (let i = 0; i < n; i++) for (let c = 0; c < fmt.nc; c++) { ch[c][i] = v.getInt16(p, true) / 32767; p += 2; }
+        return out;
+      }
+      o = body + len + (len & 1);
+    }
+  } catch (e) {}
+  return null;
+}
+function gfJoin(parts) {
+  if (parts.length === 1) return parts[0];
+  const sr = parts[0].sampleRate, nc = Math.max(...parts.map(b => b.numberOfChannels));
+  if (parts.some(b => b.sampleRate !== sr)) throw new Error('parts differ');
+  const out = new AudioBuffer({ numberOfChannels: nc, length: parts.reduce((s, b) => s + b.length, 0), sampleRate: sr });
+  for (let c = 0; c < nc; c++) { const d = out.getChannelData(c); let o = 0; for (const b of parts) { d.set(b.getChannelData(Math.min(c, b.numberOfChannels - 1)), o); o += b.length; } }
+  return out;
+}
+
+/* keeping: hand a tape's audio to Discobot, once per audio */
+function gfKeep(t) {
+  const src = t.src, rec = { status: 'pending', files: null, enc: '', error: null, name: t.name };
+  G.rec.set(src, rec);
+  gfTok(src);
+  let parts;
+  if (t.srcBytes && t.srcBytes.byteLength >= 1 && t.srcBytes.byteLength <= GF_MAX) {
+    parts = [{ mime: (t.srcType || 'application/octet-stream').slice(0, 100), data: t.srcBytes.slice(0) }];
+  } else {
+    rec.enc = 'wav';
+    const per = Math.floor((GF_MAX - 44) / (Math.min(2, src.numberOfChannels) * 2));
+    parts = [];
+    for (let a = 0; a < src.length; a += per) parts.push({ mime: 'audio/wav', data: gfWav(src, a, Math.min(src.length, a + per)) });
+  }
+  const meta = { bytes: t.srcBytes, type: t.srcType, name: t.srcName };
+  Promise.all(parts.map(p => gfAsk({ type: 'putFile', mime: p.mime, data: p.data }, [p.data]))).then(ans => {
+    const bad = ans.find(m => !m || typeof m.file !== 'string' || !GF_RE.test(m.file));
+    if (bad) {
+      rec.status = 'failed';
+      rec.error = bad && ['too-large', 'full', 'unavailable'].includes(bad.error) ? bad.error : 'unavailable';
+      const owner = S.tapes.find(x => x.src === src);
+      toast(`Couldn’t keep “${owner ? owner.name : rec.name}” with the Discobot project: ${gfWhy(rec.error)} It still plays here.`);
+      gfNotes();
+      return;
+    }
+    rec.files = ans.map(m => m.file); rec.status = 'kept';
+    G.bufs.set(rec.files.join(' '), { buf: src, meta });
+    gfChanged();
+    gfNotes();
+  });
+}
+function gfWhy(err) {
+  if (err === 'full') return 'this browser’s space for recordings kept by Discobot is used up. Free some by deleting old projects in Discobot.';
+  if (err === 'too-large') return 'a part of it was over 8 MB.';
+  return 'Discobot couldn’t store it.';
+}
+// Every second, and after new settings: hand over any tape audio Discobot does not have yet.
+function gfSweep() {
+  if (!G.on || !G.booted || G.pending || performance.now() < G.sweepAt) return;
+  for (const t of S.tapes) {
+    const src = t.src;
+    if (!src || gfIsHold(src) || G.rec.has(src) || gfBuiltin(src)) continue;
+    gfKeep(t);
+  }
+  gfNotes();
+}
+
+/* fetching: the files named in settings, once per page load */
+function gfFetch(files, enc) {   // → { buf, meta } now, or a promise of one (null if missing)
+  const key = files.join(' '), have = G.bufs.get(key);
+  if (have) return have.promise || have;
+  const promise = Promise.all(files.map(f => gfAsk({ type: 'getFile', file: f }))).then(async ans => {
+    if (ans.some(m => !m || !(m.data instanceof ArrayBuffer) || m.data.byteLength < 1)) return null;
+    let buf, bytes = null, type = '';
+    if (enc === 'wav') {
+      const parts = ans.map(m => gfParseWav(m.data) || null);
+      buf = parts.every(Boolean) ? gfJoin(parts) : gfJoin(await Promise.all(ans.map(m => decodeBytes(m.data))));
+    } else {
+      bytes = ans.length === 1 ? ans[0].data : null;
+      type = ans.length === 1 && typeof ans[0].mime === 'string' ? ans[0].mime.slice(0, 100) : '';
+      buf = ans.length === 1 ? await decodeBytes(bytes) : gfJoin(await Promise.all(ans.map(m => decodeBytes(m.data))));
+    }
+    return { buf, meta: { bytes, type } };
+  }).catch(() => null).then(got => {
+    if (!got) { G.bufs.delete(key); return null; }   // missing: ask again the next time settings name it
+    G.rec.set(got.buf, { status: 'kept', files: files.slice(), enc, error: null });
+    G.bufs.set(key, got);
+    return got;
+  });
+  G.bufs.set(key, { promise });
+  return promise;
+}
+// What a tape's settings name, now if it is here (a buffer, or { buf, meta }), or a promise of it.
+function gfResolve(pt) {
+  if (typeof pt.tok === 'string' && G.tokSrc.has(pt.tok)) return G.tokSrc.get(pt.tok);
+  const files = gfFilesOf(pt);
+  if (files) return gfFetch(files, pt.enc === 'wav' ? 'wav' : '');
+  if (typeof pt.builtin === 'string') return gfBuiltinGet(pt.builtin);
+  return null;
+}
+
+/* putting audio onto a tape */
+function gfApplyTape(t, pt) {   // settings onto a tape; true if its loop has to be rebuilt
+  const num = (v, lo, hi) => typeof v === 'number' && isFinite(v) ? clamp(v, lo, hi) : null;
+  const shape = () => [t.mode, t.tapeLen, t.offset, t.reverse, t.trimIn, t.trimOut, t.fadeIn, t.fadeOut, t.fadeCurve].join();
+  const before = shape();
+  if (typeof pt.name === 'string' && pt.name && pt.name !== t.name) {
+    t.name = pt.name.slice(0, 40);
+    if (t.ui) { t.ui.name.value = t.name; if (t.ui.mixName) { t.ui.mixName.textContent = t.name; t.ui.mixName.title = t.name; } }
+  }
+  if (pt.mode === 'loop' || pt.mode === 'pad') t.mode = pt.mode;
+  const tl = num(pt.tapeLen, 0.1, 600); if (tl !== null) t.tapeLen = tl;
+  const of = num(pt.offset, 0, 600); if (of !== null) t.offset = of < t.tapeLen ? of : 0;
+  if (typeof pt.reverse === 'boolean') t.reverse = pt.reverse;
+  const nt = num(pt.note, 0, 127); if (nt !== null) t.note = Math.round(nt);
+  if (!gfIsHold(t.src)) {   // trims are in seconds of this audio, so they wait for it
+    const D = t.src.duration, tiIn = num(pt.trimIn, 0, D), tiOut = num(pt.trimOut, 0, D);
+    if (tiIn !== null || tiOut !== null) { const a = tiIn ?? 0, b = tiOut ?? D; if (b - a >= MIN_TRIM) { t.trimIn = a; t.trimOut = b; } }
+    const gfi = num(pt.fadeIn, 0, 600), gfo = num(pt.fadeOut, 0, 600);
+    if (gfi !== null) t.fadeIn = gfi;
+    if (gfo !== null) t.fadeOut = gfo;
+    if (FADE_CURVES[pt.fadeCurve]) t.fadeCurve = pt.fadeCurve;
+    clampFades(t);
+  }
+  if (pt.p && typeof pt.p === 'object') for (const [k, spec] of Object.entries(CH)) {
+    if (k === 'speed' || !(k in pt.p)) continue;
+    if (spec.toggle) { if (typeof pt.p[k] === 'boolean') t.p[k] = pt.p[k]; }
+    else { const v = num(pt.p[k], spec.min, spec.max); if (v !== null) t.p[k] = v; }
+  }
+  const sp = num(pt.speed, CH.speed.min, CH.speed.max); if (sp !== null && sp !== t.speed) setSpeed(t, sp);
+  for (const k of Object.keys(CH)) syncCtl(`t${t.id}:${k}`);
+  return shape() !== before;
+}
+function gfSetAudio(t, buf, meta, pt) {
+  const fresh = t.src !== buf;
+  if (fresh) {
+    t.src = buf;
+    t.trimIn = 0; t.trimOut = buf.duration; t.fadeIn = 0; t.fadeOut = 0;
+    if (!gfIsHold(buf)) {
+      t.srcBytes = meta && meta.bytes || null; t.srcType = meta && meta.type || '';
+      if (typeof pt.srcName === 'string' && pt.srcName) t.srcName = pt.srcName.slice(0, 120);
+    }
+    if (t.sd) { t.sd = null; if (t.ui && t.ui.sdBtn) t.ui.sdBtn.hidden = true; }
+  }
+  t._gf = gfIsHold(buf) ? { pt, miss: false } : null;
+  const reshaped = gfApplyTape(t, pt);
+  if (fresh) {
+    t.clip = makeClip(t); t._clipDirty = false;
+    if (t.offset >= t.tapeLen) t.offset = 0;
+    t.loopBuf = buildLoopBuffer(t); t.builtRev = t.reverse; t.ver++;
+    // joins in time: where it would be had it played from the start
+    if (S.playing && AC && t.ch) startVoice(t, (AC.currentTime - S.t0) * t.speed);
+    if (t.ui) { drawStripStatic(t); updateCardFields(t); if (t.ui.trimPanel && !t.ui.trimPanel.hidden) drawTrimWave(t); }
+    linkChanged();
+  } else if (reshaped) { t._clipDirty = true; rebuild(t); }
+  else if (t.ui) updateCardFields(t);
+  gfNote(t);
+}
+function gfLoad(t, pt) {   // give the tape the audio its settings name: now if it is here, else when it arrives
+  let got = gfResolve(pt);
+  const put = g => {
+    if (g instanceof AudioBuffer) gfSetAudio(t, g, null, pt);
+    else gfSetAudio(t, g.buf, g.meta, pt);
+  };
+  if (got && !(got instanceof Promise)) { put(got); return; }
+  gfSetAudio(t, gfHold(), null, pt);
+  if (!got) { t._gf.miss = true; gfNote(t); return; }
+  const want = t._gf;
+  got.then(g => {
+    if (t._gf !== want || !gfIsHold(t.src) || !S.tapes.includes(t)) return;   // newer settings, new audio, or the tape is gone
+    if (g) put(g); else { want.miss = true; gfNote(t); }
+  });
+}
+
+// New settings: make the deck's tapes exactly these, without stopping, and keep the audio already here.
+function gfApply(st) {
+  const num = (v, lo, hi) => typeof v === 'number' && isFinite(v) ? clamp(v, lo, hi) : null;
+  if (typeof st.name === 'string') $('#projName').value = st.name.slice(0, 80);
+  const snap = num(st.snap, 0, 1); if (snap !== null) { S.snap = snap; $('#snapSel').value = String(snap); }
+  const mv = st.master && num(st.master.vol, -60, 6); if (mv !== null && mv !== undefined) { S.master.vol = mv; applyMaster(); syncCtl('m:vol'); }
+  if (typeof st.mxOn === 'boolean') { S.mxOn = st.mxOn; syncCtl('m:mxOn'); }
+  const ml = num(st.mxLvl, -60, 6); if (ml !== null) { S.mxLvl = ml; syncCtl('m:mxLvl'); }
+
+  const list = (Array.isArray(st.tapes) ? st.tapes : []).filter(pt => pt && typeof pt === 'object' && !Array.isArray(pt)).slice(0, 256);
+  const pool = [...S.tapes], pick = [];
+  // the same audio first, then a tape of the same name (whose audio changes if these settings name other audio)
+  list.forEach((pt, i) => {
+    const ks = gfKeysOf(pt); if (!ks.length) return;
+    const j = pool.findIndex(t => t && gfTapeKeys(t).some(k => ks.includes(k)));
+    if (j >= 0) { pick[i] = { t: pool[j], same: true }; pool[j] = null; }
+  });
+  list.forEach((pt, i) => {
+    if (pick[i]) return;
+    const j = pool.findIndex(t => t && t.name === pt.name);
+    if (j >= 0) { pick[i] = { t: pool[j], same: !gfKeysOf(pt).length }; pool[j] = null; }
+  });
+  let changed = false;
+  pool.forEach(t => { if (t) { removeTape(t); changed = true; } });
+  const made = list.map((pt, i) => {
+    let t = pick[i] && pick[i].t;
+    if (!t) {
+      const mc = num(pt.midiCh, 0, 16);
+      t = createTape({ name: typeof pt.name === 'string' && pt.name ? pt.name.slice(0, 40) : 'Tape', clip: gfHold(), mode: pt.mode === 'pad' ? 'pad' : 'loop',
+        tapeLen: num(pt.tapeLen, 0.1, 600) || 1, midiCh: mc === null ? undefined : Math.round(mc), quiet: true });
+      changed = true;
+      gfLoad(t, pt);
+    } else if (pick[i].same) {
+      if (gfIsHold(t.src)) gfLoad(t, pt);          // still waiting: carry on waiting, with these settings
+      else gfSetAudio(t, t.src, null, pt);
+    } else gfLoad(t, pt);
+    return t;
+  });
+  if (made.some((t, i) => S.tapes[i] !== t) || S.tapes.length !== made.length) {
+    S.tapes = made.concat(S.tapes.filter(t => !made.includes(t)));
+    S.tapes.forEach(t => { if (t.ui) $('#tapes').append(t.ui.card); });
+    changed = true;
+  }
+  S.mx = {};
+  if (Array.isArray(st.mxi)) {
+    for (const r of st.mxi) {
+      if (!Array.isArray(r)) continue;
+      const A = made[r[0]], B = made[r[1]], db = num(r[2], -60, 6);
+      if (A && B && A !== B && db !== null && db > -60) S.mx[mxKey(A.id, B.id)] = db;
+    }
+  } else if (Array.isArray(st.matrix)) {
+    for (const r of st.matrix) {
+      if (!r || typeof r !== 'object') continue;
+      const A = made.find(t => t.name === r.from), B = made.find(t => t.name === r.to), db = num(r.db, -60, 6);
+      if (A && B && db !== null && db > -60) S.mx[mxKey(A.id, B.id)] = db;
+    }
+  }
+  if (changed) { renumber(); refreshMixer(); refreshMap(); patRender(); }
+  for (const id of CTL.keys()) if (id.startsWith('x:')) syncCtl(id);
+  applyMatrix();
+  applyAll();
+  gfNotes();
+}
+
+// What a tape's settings say about its audio.
+function gfCaptureTape(t) {
+  const e = { name: t.name, mode: t.mode, tapeLen: t.tapeLen, offset: t.offset, speed: t.speed, reverse: t.reverse, note: t.note, midiCh: t.midiCh,
+    trimIn: t.trimIn, trimOut: t.trimOut, fadeIn: t.fadeIn, fadeOut: t.fadeOut, fadeCurve: t.fadeCurve, p: Object.assign({}, t.p) };
+  if (gfIsHold(t.src)) {
+    // audio missing or on its way: keep naming what the settings named, trims included
+    const w = t._gf && t._gf.pt;
+    if (!w) return e;
+    for (const k of ['trimIn', 'trimOut', 'fadeIn', 'fadeOut', 'fadeCurve', 'srcName']) if (k in w) e[k] = w[k];
+    const files = gfFilesOf(w);
+    if (files) { e.files = files; if (w.enc === 'wav') e.enc = 'wav'; }
+    if (typeof w.builtin === 'string') e.builtin = w.builtin;
+    if (typeof w.tok === 'string' && G.tokSrc.has(w.tok)) e.tok = w.tok;
+    return e;
+  }
+  const b = gfBuiltin(t.src);
+  if (b) { e.builtin = b; return e; }
+  const r = G.rec.get(t.src);
+  if (r && r.files) { e.files = r.files.slice(); if (r.enc) e.enc = r.enc; }
+  e.tok = gfTok(t.src);
+  if (t.srcName) e.srcName = t.srcName.slice(0, 120);
+  return e;
+}
+
+/* on each tape's card: a word when its recording is missing, loading, or could not be kept */
+function gfNote(t) {
+  if (!t.ui) return;
+  let txt = '', tip = '';
+  if (G.on) {
+    if (gfIsHold(t.src) && t._gf) {
+      if (t._gf.miss) { txt = 'Recording missing'; tip = 'This project came without this tape’s audio (a shared link, a published project or another device carries settings only; Export Project carries the audio). Record it again or use Replace sound: its settings stay.'; }
+      else { txt = 'Loading recording…'; tip = 'Discobot is handing back this tape’s audio. It joins in time when it arrives.'; }
+    } else if (gfIsHold(t.src)) { txt = 'No recording'; tip = 'Use Replace sound to load one.'; }
+    else {
+      const r = G.rec.get(t.src);
+      if (r && r.status === 'failed') { txt = 'Not kept with the Discobot project'; tip = 'It plays in this session, but Discobot could not keep it: ' + gfWhy(r.error) + ' Save project keeps it in a file.'; }
+    }
+  }
+  if (!t.ui.keep) { if (!txt) return; t.ui.keep = h('span', { class: 'tape-meta tape-keep' }); t.ui.meta.after(t.ui.keep); }
+  t.ui.keep.textContent = txt; t.ui.keep.title = tip; t.ui.keep.hidden = !txt;
+}
+function gfNotes() { S.tapes.forEach(gfNote); }
+
 function guestTransport(m) {
   if (m.playing === false) { G.playing = false; if (S.playing) stop(); guestShow(); return; }
   if (m.playing !== true) return;
@@ -3276,13 +3673,14 @@ if (GUEST_FRAMED) {
         if (m.host !== 'discobot') return;
         const lat = Number(m.latencyMs);
         G.latencyMs = isFinite(lat) ? clamp(lat, 0, 1000) : 0;
-        if (!G.on) { G.on = true; if (S.playing) stop(); guestSyncAudio(); }
+        if (!G.on) { G.on = true; G.sweepAt = performance.now() + 2000; if (S.playing) stop(); guestSyncAudio(); }
         break;
       }
       case 'transport': guestTransport(m); break;
       case 'getState': if (typeof m.id === 'string' && m.id.length <= 256) guestSend({ type: 'state', id: m.id, state: guestCapture() }); break;
       case 'setState': guestApply(m.state); break;
       case 'audio': if (typeof m.on === 'boolean') { G.audio = m.on; guestSyncAudio(); } break;
+      case 'fileStored': case 'file': gfAnswer(m); return;
       default: return;
     }
     guestShow();
@@ -3293,8 +3691,8 @@ if (GUEST_FRAMED) {
     G.changeTimer = setTimeout(() => { G.changeTimer = 0; if (G.on) guestSend({ type: 'stateChanged' }); }, 1000);
   };
   ['input', 'change', 'click', 'pointerup'].forEach(t => document.addEventListener(t, noteChange, true));
-  setInterval(guestShow, 1000);
-  guestSend({ type: 'ready', name: 'Tape Loop Deck', features: ['transport', 'state', 'audio'] });
+  setInterval(() => { guestShow(); gfSweep(); }, 1000);
+  guestSend({ type: 'ready', name: 'Tape Loop Deck', features: ['transport', 'state', 'audio', 'files'] });
 }
 
 /* ================= boot ================= */
