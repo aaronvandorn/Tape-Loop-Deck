@@ -19,7 +19,7 @@ Nothing is uploaded; all audio stays in your browser.
 
 The **Sound design** tab makes new sounds from scratch with a small modular synth, all rendered in the browser.
 
-- **Generate:** pick a **Sound** (Chord stab, Electric piano, Melody, Vibes & mallets, Bassline, Drone, Orchestral haze, Fragments, Clicks, Percussion, Hats & shakers, Texture), a **Style**, a **Length** (¼ bar to 16 bars, or 1 to 30 seconds), a **Key** and mode (or leave them to chance) and a **BPM** (**Deck tempo** copies the pattern grid's), then press **Generate**. - **Style** reshapes the patch and sometimes the notes:
+- **Generate:** pick a **Sound** (Chord stab, Electric piano, Melody, Vibes & mallets, Bassline, Drone, Orchestral haze, Fragments, Soft kick, Clap, Clicks, Percussion, Hats & shakers, Texture), a **Style**, a **Length** (¼ bar to 16 bars, or 1 to 30 seconds), a **Key** and mode (or leave them to chance) and a **BPM** (**Deck tempo** copies the pattern grid's), then press **Generate**. - **Style** reshapes the patch and sometimes the notes:
   - **Microhouse:** clean and swung, with dub echoes and tight filters.
   - **Shellac:** muffled, crackly, warbling tones, as if lifted from a worn record, cut into tiny stuttering loops.
   - **Afterhours:** soft FM electric pianos, round bass, lush width, gentle tape saturation.
@@ -27,6 +27,7 @@ The **Sound design** tab makes new sounds from scratch with a small modular synt
   - **Elastic:** squelchy FM, randomly bending pitches, ratcheting notes, bit-crushing.
   - **Surprise me** picks one of these each time you generate.
 - **Orchestral haze** loops strings and horns into a slow, blurred, beatless fog: long swells, wide voicings, vibrato, worn tape and gentle micro-looping.
+- **Generate set** makes six tapes at once, all in one key, tempo, length and style: a soft kick, a clap, hats or clicks, a bassline, a harmony layer (chords, electric piano, drone or orchestral haze) and one more color (melody, mallets, fragments, percussion or texture). They arrive levelled and panned. **Set: add to deck** puts them alongside what's there and sets the grid to their tempo; **Set: replace deck** clears the deck first and adds four patterns (Intro, Groove, Full, Break) plus a chain you can switch on. Every tape in a set has **Edit sound**.
 - **Ending:** **Loop · ends in silence** brings every note, tail and echo down to silence before the loop point, so the sound repeats without a click. **Free running** lets notes and echoes run straight off the end. Ending, Length and BPM also change the current sound in place.
 - **Audition** loops the sound (in time with the deck if it's playing). **Re-roll notes** keeps the sound and writes new notes; **Re-roll sound** keeps the notes and makes a new patch.
 - **Add to deck** puts it on a new tape. Tapes made here have an **Edit sound** button that brings the sound back to this tab, where **Update tape** replaces the tape's audio in place.
