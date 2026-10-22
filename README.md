@@ -21,10 +21,10 @@ The **Sound design** tab makes new sounds from scratch with a small modular synt
 
 - **Generate:** pick a **Sound** (Chord stab, Electric piano, Melody, Vibes & mallets, Bassline, Drone, Fragments, Clicks, Percussion, Hats & shakers, Texture), a **Style**, a **Length** (¼ bar to 16 bars, or 1 to 30 seconds), a **Key** and mode (or leave them to chance) and a **BPM** (**Deck tempo** copies the pattern grid's), then press **Generate**. - **Style** reshapes the patch and sometimes the notes:
   - **Microhouse:** clean and swung, with dub echoes and tight filters.
-  - **Loop-finding** (after Jan Jelinek's *Loop-Finding-Jazz-Records*): muffled, crackly, warbling tones that sound sampled off old records, cut into tiny stuttering loops.
-  - **Deep & warm** (after Move D): soft FM electric pianos, round bass, lush width, gentle tape saturation.
-  - **Skipping CD** (after Oval): soft washes broken up by CD skips, buzzing repeats, dropouts and digital grit.
-  - **Wonky & rubbery** (after Mouse on Mars): squelchy FM, randomly bending pitches, ratcheting notes, bit-crushing.
+  - **Shellac:** muffled, crackly, warbling tones, as if lifted from a worn record, cut into tiny stuttering loops.
+  - **Afterhours:** soft FM electric pianos, round bass, lush width, gentle tape saturation.
+  - **Hairline:** soft washes broken up by CD skips, buzzing repeats, dropouts and digital grit.
+  - **Elastic:** squelchy FM, randomly bending pitches, ratcheting notes, bit-crushing.
   - **Surprise me** picks one of these each time you generate.
 - **Ending:** **Loop · ends in silence** brings every note, tail and echo down to silence before the loop point, so the sound repeats without a click. **Free running** lets notes and echoes run straight off the end. Ending, Length and BPM also change the current sound in place.
 - **Audition** loops the sound (in time with the deck if it's playing). **Re-roll notes** keeps the sound and writes new notes; **Re-roll sound** keeps the notes and makes a new patch.

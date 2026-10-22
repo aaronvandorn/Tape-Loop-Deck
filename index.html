@@ -3819,7 +3819,7 @@ function sdSanitize(rec) {
   const notes = (Array.isArray(rec.notes) ? rec.notes : []).slice(0, 4000).filter(n => n && isFinite(n.s) && isFinite(n.d) && Array.isArray(n.n))
     .map(n => ({ s: Math.max(0, +n.s), d: clamp(+n.d, 0.05, 4096), v: clamp(isFinite(n.v) ? +n.v : 0.8, 0, 1), n: n.n.filter(isFinite).slice(0, 8).map(m => clamp(Math.round(m), 0, 127)) }))
     .filter(n => n.n.length);
-  return { v: 1, type: rec.type, style: SD_STYLES[rec.style] ? rec.style : 'micro', name: String(rec.name || SD_TYPES[rec.type].name).slice(0, 40), seed: (rec.seed >>> 0) || 1,
+  return { v: 1, type: rec.type, style: SD_STYLES[rec.style] ? rec.style : rec.style === 'loopf' ? 'dust' : 'micro', name: String(rec.name || SD_TYPES[rec.type].name).slice(0, 40), seed: (rec.seed >>> 0) || 1,
     len, bpm: clamp(+rec.bpm || 124, 20, 300), bpb: clamp(Math.round(+rec.bpb || 4), 1, 16), loop: rec.loop !== false,
     root: clamp(Math.round(+rec.root || 0), 0, 11), scale: SD_SCALES[rec.scale] ? rec.scale : 'dorian', notes, patch: p };
 }
@@ -3853,18 +3853,18 @@ function sdRhythm(r, steps, motifLen, w, minHits, density = 1) {
 /* styles: each reshapes a generated patch (and sometimes its notes) toward a sound world */
 const SD_STYLES = {
   micro:   { name: 'Microhouse', short: 'Microhouse', desc: 'Clean, swung and minimal: dub echoes, tight filters, small sounds.', fn() {} },
-  loopf:   { name: 'Loop-finding (à la Jan Jelinek)', short: 'Loop-finding', scales: ['dorian', 'minor', 'dorian', 'pent'],
-    desc: 'Sounds as if sampled off old jazz records: muffled, crackly, warbling, and cut into tiny stuttering loops.', fn: styleLoopf },
-  deep:    { name: 'Deep & warm (à la Move D)', short: 'Deep & warm', scales: ['dorian', 'minor', 'dorian', 'lydian'],
+  dust:    { name: 'Shellac', short: 'Shellac', scales: ['dorian', 'minor', 'dorian', 'pent'],
+    desc: 'Muffled, crackly and warbling, as if lifted from a worn record, then cut into tiny stuttering loops.', fn: styleDust },
+  deep:    { name: 'Afterhours', short: 'Afterhours', scales: ['dorian', 'minor', 'dorian', 'lydian'],
     desc: 'Warm deep house: soft electric pianos, round bass, lush width, gentle tape saturation.', fn: styleDeep },
-  skip:    { name: 'Skipping CD (à la Oval)', short: 'Skipping CD', scales: ['lydian', 'mpent', 'dorian', 'pent'],
+  skip:    { name: 'Hairline', short: 'Hairline', scales: ['lydian', 'mpent', 'dorian', 'pent'],
     desc: 'Soft washes broken up by CD skips, buzzing repeats, dropouts and digital grit.', fn: styleSkip },
-  wonky:   { name: 'Wonky & rubbery (à la Mouse on Mars)', short: 'Wonky & rubbery', scales: ['dorian', 'phrygian', 'mpent', 'minor', 'lydian'],
+  wonky:   { name: 'Elastic', short: 'Elastic', scales: ['dorian', 'phrygian', 'mpent', 'minor', 'lydian'],
     desc: 'Playful and elastic: squelchy FM, bending pitches, ratcheting notes, bit-crushed bits.', fn: styleWonky }
 };
 const SD_STYLE_KEYS = Object.keys(SD_STYLES);
 function sdHumanize(rec, r, amt) { for (const n of rec.notes) n.v = clamp(n.v * (1 - amt / 2 + r() * amt), 0.1, 1); }
-function styleLoopf(rec, r) {
+function styleDust(rec, r) {
   const P = rec.patch, tonal = sdTonal(rec);
   Object.assign(P, { muffle: rr(r, 2200, 5200), vinyl: rr(r, 0.25, 0.55), wow: rr(r, 0.15, 0.4), 'wow.hz': rr(r, 0.3, 0.9), flutter: rr(r, 0.1, 0.35),
     chop: rr(r, 0.3, 0.65), 'chop.mode': pick(r, ['stutter', 'stutter', 'mix']), 'chop.div': pick(r, [1, 2, 2, 4]),
