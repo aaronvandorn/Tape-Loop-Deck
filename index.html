@@ -2286,10 +2286,20 @@ $('#layFaders').addEventListener('click', () => setOrder(['fader', 'pan', 'gain'
 
 /* ---------- tape-head lamps
    White while silence is under the head. Over the last three seconds before the clip reaches the head
-   the lamp darkens to deep blue and pulses as the clip starts; over the last three seconds of the clip
-   it lightens back to white and pulses as the clip leaves the head. Times are real seconds, so tape
+   deep blue falls into the lamp from the top until it is full, and it pulses as the clip starts; over
+   the last three seconds of the clip white falls in from the top the same way, and it pulses as the
+   clip leaves the head. Times are real seconds, so tape
    speed is counted, and the ramps shorten when a clip or its gap is shorter than six seconds. */
-const LAMP_LIGHT = [247, 247, 242], LAMP_DARK = [12, 33, 92];
+const LAMP_LIGHT = 'rgb(247,247,242)', LAMP_DARK = 'rgb(12,33,92)';
+// level 1 = all blue; inside the clip white falls from the top, outside it blue does
+function lampFill(r) {
+  if (!r) return LAMP_LIGHT;
+  if (r.level >= 0.999) return LAMP_DARK;
+  if (r.level <= 0.001) return LAMP_LIGHT;
+  const [top, bot, f] = r.inside ? [LAMP_LIGHT, LAMP_DARK, 1 - r.level] : [LAMP_DARK, LAMP_LIGHT, r.level];
+  const pct = (f * 100).toFixed(1);
+  return `linear-gradient(to bottom, ${top} 0 ${pct}%, ${bot} ${pct}% 100%)`;
+}
 function refreshLamps() {
   const bar = $('#lamps'), tr = $('#lampTrack'); if (!bar) return;
   tr.innerHTML = '';
@@ -2334,17 +2344,15 @@ function updateLamps(now) {
     const el = t.ui && t.ui.lamp; if (!el) continue;
     const r = lampRead(t), prev = t._lamp;
     const level = r ? r.level : 0;
-    if (!prev || Math.abs(prev.level - level) > 0.004) {
-      const rgb = LAMP_LIGHT.map((a, j) => Math.round(a + (LAMP_DARK[j] - a) * level));
-      el.style.background = `rgb(${rgb.join(',')})`;
-    }
+    const inside = !!(r && r.inside);
+    if (!prev || Math.abs(prev.level - level) > 0.004 || prev.inside !== inside) el.style.background = lampFill(r);
     if (r && prev && prev.r && now - prev.at < 250) {
       if (!prev.r.inside && r.inside) lampPulse(el, 'start');
       else if (prev.r.inside && !r.inside) lampPulse(el, 'end');
       else if (prev.r.inside && r.inside && r.into < prev.r.into - 1e-3) lampPulse(el, 'start');   // clip fills the tape: end and start meet
     }
     t.ui.lampCell.classList.toggle('muted', !!t.p.mute);
-    t._lamp = { level, r, at: now };
+    t._lamp = { level, inside, r, at: now };
   }
 }
 
