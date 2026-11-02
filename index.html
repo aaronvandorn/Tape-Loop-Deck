@@ -4778,11 +4778,31 @@ function sdNoiseBuf(oc, r) {
   for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < n; i++) d[i] = r() * 2 - 1; }
   return b;
 }
+/* When a sound ends in silence, a note near the end has to finish before the closing fade. A note that
+   still has room for half its natural length, or a quarter second, is shortened to fit; one with less
+   room is dropped, since squeezing it would leave a click right before the silence on every pass. */
+function sdNoteTime(rec, nt) {
+  const P = rec.patch, L = sdLen(rec), stepS = sdStepSec(rec);
+  let t = nt.s * stepS; const st = Math.round(nt.s);
+  if (Math.abs(nt.s - st) < 1e-6 && st % 2 === 1) t += P.swing * stepS;
+  if (t >= L) return null;
+  let dur = Math.max(0.003, nt.d * stepS * P.gate), rel = P['ae.r'];
+  if (rec.loop) {
+    const avail = L - sdFadeLen(rec) - t, nat = dur + rel;
+    if (avail < 0.006) return null;
+    if (nat > avail) {
+      if (avail < nat * 0.5 && avail < 0.25) return null;
+      rel = Math.min(rel, avail * 0.5); dur = Math.max(0.002, Math.min(dur, avail - rel));
+    }
+  }
+  return { t, dur, rel };
+}
+const sdFadeLen = rec => rec.loop ? clamp(sdLen(rec) * 0.06, 0.012, 0.5) : 0;
 const sdQ = (type, res) => type === 'lowpass' || type === 'highpass' ? res * 22 : 0.7 * Math.pow(40, res);
 async function sdRender(rec) {
   const P = rec.patch, L = sdLen(rec), stepS = sdStepSec(rec), N = Math.max(64, Math.round(L * SR));
   const oc = new OfflineAudioContext(2, N, SR), r = rng((rec.seed ^ 0x5bd1e995) >>> 0);
-  const fade = rec.loop ? clamp(L * 0.06, 0.012, 0.5) : 0, end = rec.loop ? L - fade : Infinity;
+  const fade = sdFadeLen(rec);
   const bus = oc.createGain(), trem = oc.createGain(), bpan = oc.createStereoPanner();
   bus.connect(trem); trem.connect(bpan); bpan.connect(oc.destination);
   // LFOs: each feeds a summing node per destination, already scaled to that destination's units
@@ -4854,15 +4874,9 @@ async function sdRender(rec) {
     }
   }
   for (const nt of rec.notes) {
-    let t = nt.s * stepS; const st = Math.round(nt.s);
-    if (Math.abs(nt.s - st) < 1e-6 && st % 2 === 1) t += P.swing * stepS;
     const pan = (r() * 2 - 1) * P.scatter, cutR = Math.pow(2, (r() * 2 - 1) * P['vcf.rnd']);
-    if (t >= L) continue;
-    let dur = Math.max(0.003, nt.d * stepS * P.gate), rel = P['ae.r'];
-    if (rec.loop) {
-      const avail = end - t; if (avail < 0.006) continue;
-      if (dur + rel > avail) { rel = Math.min(rel, avail * 0.5); dur = Math.max(0.002, Math.min(dur, avail - rel)); }
-    }
+    const nx = sdNoteTime(rec, nt); if (!nx) continue;
+    const { t, dur, rel } = nx;
     const amp = P['vca.lvl'] * (1 - P['vca.vel'] * (1 - nt.v));
     const pa = P['pe.amt'] * (1 - P['pe.rnd'] + P['pe.rnd'] * (r() * 2 - 1));
     for (const m of nt.n) voice(clamp(m + P.trans, 0, 127), t, dur, rel, amp, pan, cutR, pa);
@@ -4913,7 +4927,7 @@ function sdPost(buf, rec, fade) {
   sdCrush(chs, n, sr, P);
   if (P.muffle < 19000) { const a = 1 - Math.exp(-2 * Math.PI * P.muffle / sr); for (const d of chs) { let y1 = 0, y2 = 0; for (let i = 0; i < n; i++) { y1 += a * (d[i] - y1); y2 += a * (y1 - y2); d[i] = y2; } } }
   sdWow(chs, n, sr, P);
-  sdVinyl(chs, n, sr, P.vinyl, r);
+  sdVinyl(chs, n, sr, P.vinyl, r, rec.loop);
   const pk = sdPeak(chs); if (pk > 1e-7) sdScale(chs, 0.7 / pk);
   if (rec.loop) {        // bring everything to silence before the loop point
     const fn = Math.min(n, Math.round(fade * sr)), z = Math.min(n, 32);
@@ -4972,10 +4986,10 @@ function sdWow(chs, n, sr, P) {
   }
 }
 /* vinyl: hiss, crackle and the odd pop */
-function sdVinyl(chs, n, sr, amt, r) {
+function sdVinyl(chs, n, sr, amt, r, loop) {
   if (amt <= 0.001) return;
-  const [Ld, Rd] = chs, L = n / sr; let lp = 0;
-  for (let i = 0; i < n; i++) { const x = r() * 2 - 1; lp += 0.3 * (x - lp); const hs = (x - lp) * amt * 0.025; Ld[i] += hs; Rd[i] += hs * 0.8 + (r() - 0.5) * amt * 0.006; }
+  const [Ld, Rd] = chs, L = n / sr, fin = loop ? Math.min(n >> 2, Math.round(0.03 * sr)) : 0; let lp = 0;
+  for (let i = 0; i < n; i++) { const x = r() * 2 - 1, g = i < fin ? 0.5 - 0.5 * Math.cos(Math.PI * i / fin) : 1; lp += 0.3 * (x - lp); const hs = (x - lp) * amt * 0.025 * g; Ld[i] += hs; Rd[i] += hs * 0.8 + (r() - 0.5) * amt * 0.006 * g; }
   const clicks = Math.round(amt * L * 30), pops = Math.round(amt * L * 1.5);
   for (let k = 0; k < clicks + pops; k++) {
     const pop = k >= clicks, at = Math.floor(r() * n), len = pop ? 60 + Math.floor(r() * 120) : 6 + Math.floor(r() * 30);
@@ -5020,7 +5034,7 @@ function sdDrawWave() {
     c.fillStyle = bar ? COL.line : COL['grid-faint']; c.fillRect(x, 0, dpr, H);
     if (bar) { c.fillStyle = COL.muted; c.font = `${9 * dpr}px monospace`; c.fillText(String(k / rec.bpb + 1), x + 3 * dpr, 10 * dpr); }
   }
-  if (rec.loop) { const fx = (sdLen(rec) - clamp(sdLen(rec) * 0.06, 0.012, 0.5)) / L * W; c.fillStyle = COL['clip-fill']; c.fillRect(fx, 0, W - fx, H); }
+  if (rec.loop) { const fx = (sdLen(rec) - sdFadeLen(rec)) / L * W; c.fillStyle = COL['clip-fill']; c.fillRect(fx, 0, W - fx, H); }
   const d0 = b.getChannelData(0), d1 = b.getChannelData(1), n = d0.length, per = n / W, mid = H / 2, amp = H / 2 - 4 * dpr;
   c.fillStyle = COL['oxide-hi'];
   for (let x = 0; x < W; x++) {
@@ -5039,10 +5053,11 @@ function sdDrawRoll() {
   let lo = Math.min(...all) - 2, hi = Math.max(...all) + 2; if (hi - lo < 14) { const m = (hi + lo) / 2; lo = m - 7; hi = m + 7; }
   for (let s = 0; s < steps; s += 4) { const x = Math.round(s / steps * W) + 0.5; c.fillStyle = s % (rec.bpb * 4) === 0 ? COL.line : COL['grid-faint']; c.fillRect(x, 0, dpr, H); }
   const rowH = H / (hi - lo + 1);
-  for (const nt of rec.notes) for (const m of nt.n) {
-    const x = nt.s / steps * W, w = Math.max(2 * dpr, nt.d * rec.patch.gate / steps * W), y = (hi - m) * rowH;
-    c.globalAlpha = 0.45 + 0.55 * nt.v; c.fillStyle = COL.teal; c.fillRect(x, y, Math.min(w, W - x), Math.max(2 * dpr, rowH - dpr));
-  }
+  for (const nt of rec.notes) { const kept = !!sdNoteTime(rec, nt); for (const m of nt.n) {
+    const x = nt.s / steps * W, w = Math.max(2 * dpr, nt.d * rec.patch.gate / steps * W), y = (hi - m) * rowH, bw = Math.min(w, W - x), bh = Math.max(2 * dpr, rowH - dpr);
+    if (kept) { c.globalAlpha = 0.45 + 0.55 * nt.v; c.fillStyle = COL.teal; c.fillRect(x, y, bw, bh); }
+    else { c.globalAlpha = 0.5; c.strokeStyle = COL.teal; c.lineWidth = dpr; c.strokeRect(x + dpr / 2, y + dpr / 2, Math.max(dpr, bw - dpr), Math.max(dpr, bh - dpr)); }   // too close to the end to sound
+  } }
   c.globalAlpha = 1;
 }
 
