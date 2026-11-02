@@ -231,6 +231,39 @@ body.learning .learnbar{display:flex}
 .ms .mbw{display:grid;justify-items:stretch;text-align:center}
 body.learning [data-ctl]{outline:1px dashed var(--amber);outline-offset:2px}
 .is-target{outline:2px solid var(--amber)!important;outline-offset:2px;animation:pulse 1s infinite}
+/* tape-head lamps: one per lane, held under the top bar while the console scrolls */
+.lamps{position:sticky;top:calc(var(--top-h,64px) + env(safe-area-inset-top,0px));z-index:15;margin:0 0 12px;background:color-mix(in srgb,var(--bg) 96%,transparent);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:6px;padding:8px 0 6px;overflow:hidden}
+.lamps[hidden]{display:none}
+.lamp-track{display:flex;gap:8px;width:max-content;will-change:transform}
+.lamp-cell{width:138px;display:grid;justify-items:center;gap:3px}
+.lamp{width:22px;height:22px;border-radius:3px;background:#f7f7f2;border:1px solid var(--line);box-shadow:inset 0 1px 2px rgba(0,0,0,.25)}
+.lamp-cell.muted .lamp{opacity:.4}
+.lamp-no{font:500 10.5px/1 var(--mono);letter-spacing:.08em;color:var(--muted);max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* section headers: each strip section folds on its own */
+.sect-hd{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;background:none;border:0;padding:1px 0;cursor:pointer;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-family:var(--ui)}
+.sect-hd:hover{color:var(--ink)}
+.sect-hd .car{display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;transition:transform .15s}
+.sect-hd[aria-expanded="false"] .car{transform:rotate(-90deg)}
+.sect-hd[aria-expanded="false"]{color:var(--oxide-hi)}
+.sect-bd{display:grid;gap:4px}
+.sect-bd[hidden]{display:none}
+.sect .faderzone{border-top:0;padding-top:2px}
+/* strip layout bar: fold sections on every strip and set their order */
+.layoutbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-bottom:14px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 14px}
+.layoutbar .lbl{margin-right:2px}
+.lchips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lchip{display:flex;align-items:center;gap:2px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:2px;cursor:grab}
+.lchip.dragging{opacity:.4}
+.lchip.over{border-color:var(--oxide-hi)}
+.lchip button{background:none;border:0;cursor:pointer;color:var(--muted);font-family:var(--ui);padding:3px 6px;border-radius:3px;line-height:1}
+.lchip button:hover{color:var(--ink);background:var(--well)}
+.lchip button:disabled{opacity:.3;cursor:default;background:none}
+.lchip .ltog{display:flex;align-items:center;gap:5px;color:var(--ink);font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:12px}
+.lchip .ltog[aria-pressed="false"]{color:var(--oxide-hi)}
+.lchip .ltog .car{display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;transition:transform .15s}
+.lchip .ltog[aria-pressed="false"] .car{transform:rotate(-90deg)}
+.lhint{font-size:12px;color:var(--muted);flex:1 1 200px;min-width:0}
+@media (prefers-reduced-motion:reduce){.sect-hd .car,.lchip .ltog .car{transition:none}}
 @keyframes pulse{50%{outline-color:transparent}}
 
 .matrix{margin-top:16px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px 14px;display:grid;gap:12px}
@@ -403,6 +436,7 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
   </section>
 
   <section class="room" id="room-mixer" role="tabpanel" aria-labelledby="tab-mixer" hidden>
+    <div class="lamps" id="lamps" role="group" aria-label="Tape head lamps" hidden><div class="lamp-track" id="lampTrack"></div></div>
     <div class="midibar">
       <span class="led" id="midiLed"></span>
       <button class="btn small" id="midiConnect">Connect MIDI</button>
@@ -411,7 +445,14 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
       <button class="btn small" id="learnBtn" aria-pressed="false">MIDI learn</button>
     </div>
     <div class="learnbar" id="learnbar"><span id="learnText">Click a knob, fader or button, then move a control on your MIDI device.</span><button class="btn small" id="learnDone">Done</button></div>
-    <div class="console"><div class="strips" id="strips"></div></div>
+    <div class="layoutbar" id="layoutbar">
+      <span class="lbl">Strip layout</span>
+      <div class="lchips" id="lchips"></div>
+      <button class="btn small" id="layConsole">Console order</button>
+      <button class="btn small" id="layFaders">Faders first</button>
+      <span class="lhint">Left to right is top to bottom. Drag a section or use the arrows to move it; tap its name to fold it on every strip. Each strip's section titles fold just that strip.</span>
+    </div>
+    <div class="console" id="console"><div class="strips" id="strips"></div></div>
     <section class="matrix" aria-labelledby="mxTitle">
       <div class="mx-head">
         <h2 id="mxTitle">Matrix</h2>
@@ -2171,6 +2212,142 @@ function toggleEl(id, cls, text) {
 }
 function meterEl() { return h('div', { class: 'meter' }, h('i'), h('b')); }
 
+
+/* ---------- strip sections: fold each one, and set their top-to-bottom order */
+const MIX_SECS = { gain: 'Gain', eq: 'EQ', fx: 'Effects bus', pan: 'Pan', fader: 'Fader' };
+const CONSOLE_ORDER = ['gain', 'eq', 'fx', 'pan', 'fader'];
+const ML = { order: CONSOLE_ORDER.slice(), fold: {} };   // fold: what a new strip starts with
+try {
+  const sv = JSON.parse(localStorage.getItem('tld-mixlayout') || 'null');
+  if (sv && Array.isArray(sv.order) && sv.order.length === CONSOLE_ORDER.length && CONSOLE_ORDER.every(k => sv.order.includes(k))) ML.order = sv.order;
+  if (sv && sv.fold && typeof sv.fold === 'object') for (const k of CONSOLE_ORDER) ML.fold[k] = !!sv.fold[k];
+} catch (e) {}
+function saveLayout() { try { localStorage.setItem('tld-mixlayout', JSON.stringify(ML)); } catch (e) {} }
+function secFolded(o, key) { if (!o.secFold) o.secFold = Object.assign({}, ML.fold); return !!o.secFold[key]; }
+function setSecFold(o, key, folded) {
+  if (!o.secFold) o.secFold = Object.assign({}, ML.fold);
+  o.secFold[key] = folded;
+  const el = o._secEls && o._secEls[key]; if (!el) return;
+  el.hd.setAttribute('aria-expanded', String(!folded)); el.bd.hidden = folded;
+}
+function mixSect(o, key, kids) {
+  const folded = secFolded(o, key);
+  const hd = h('button', { class: 'sect-hd', 'aria-expanded': String(!folded), title: 'Fold or open this section (Shift-click: every strip)' }, h('span', { class: 'car', 'aria-hidden': 'true' }), MIX_SECS[key]);
+  const bd = h('div', { class: 'sect-bd' }, kids); bd.hidden = folded;
+  (o._secEls || (o._secEls = {}))[key] = { hd, bd };
+  hd.addEventListener('click', e => {
+    if (S.learn) return;
+    const f = !secFolded(o, key);
+    if (e.shiftKey || e.altKey) foldAll(key, f); else { setSecFold(o, key, f); refreshLayoutBar(); }
+  });
+  return h('div', { class: 'sect', 'data-sec': key }, hd, bd);
+}
+const allStrips = () => S.tapes.concat(MASTER_UI);
+function foldAll(key, folded) {
+  ML.fold[key] = folded; saveLayout();
+  for (const o of allStrips()) setSecFold(o, key, folded);
+  refreshLayoutBar();
+}
+function allFolded(key) {
+  const os = key === 'fader' ? allStrips() : S.tapes;
+  return os.length ? os.every(o => secFolded(o, key)) : !!ML.fold[key];
+}
+function setOrder(order) { ML.order = order; saveLayout(); refreshMixer(); }
+function moveSec(key, dir) {
+  const o = ML.order.slice(), i = o.indexOf(key), j = i + dir;
+  if (j < 0 || j >= o.length) return;
+  [o[i], o[j]] = [o[j], o[i]]; setOrder(o);
+  requestAnimationFrame(() => { const b = document.querySelector(`.lchip[data-k="${key}"] [data-dir="${dir}"]`); if (b && !b.disabled) b.focus(); });
+}
+let dragSec = null;
+function refreshLayoutBar() {
+  const box = $('#lchips'); if (!box) return;
+  box.innerHTML = '';
+  ML.order.forEach((key, i) => {
+    const open = !allFolded(key);
+    const chip = h('div', { class: 'lchip', draggable: 'true', 'data-k': key },
+      h('button', { 'data-dir': -1, 'aria-label': `Move ${MIX_SECS[key]} up the strip`, title: 'Move up the strip', disabled: i === 0, onclick: () => moveSec(key, -1) }, '‹'),
+      h('button', { class: 'ltog', 'aria-pressed': String(open), title: open ? 'Fold on every strip' : 'Open on every strip', onclick: () => foldAll(key, open) }, h('span', { class: 'car', 'aria-hidden': 'true' }), MIX_SECS[key]),
+      h('button', { 'data-dir': 1, 'aria-label': `Move ${MIX_SECS[key]} down the strip`, title: 'Move down the strip', disabled: i === ML.order.length - 1, onclick: () => moveSec(key, 1) }, '›'));
+    chip.addEventListener('dragstart', e => { dragSec = key; chip.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', key); e.dataTransfer.effectAllowed = 'move'; } catch (_) {} });
+    chip.addEventListener('dragend', () => { dragSec = null; chip.classList.remove('dragging'); box.querySelectorAll('.over').forEach(x => x.classList.remove('over')); });
+    chip.addEventListener('dragover', e => { if (!dragSec || dragSec === key) return; e.preventDefault(); chip.classList.add('over'); });
+    chip.addEventListener('dragleave', () => chip.classList.remove('over'));
+    chip.addEventListener('drop', e => {
+      if (!dragSec || dragSec === key) return; e.preventDefault(); e.stopPropagation();
+      const o = ML.order.filter(k => k !== dragSec); o.splice(o.indexOf(key) + (ML.order.indexOf(dragSec) < ML.order.indexOf(key) ? 1 : 0), 0, dragSec);
+      dragSec = null; setOrder(o);
+    });
+    box.append(chip);
+  });
+}
+$('#layConsole').addEventListener('click', () => setOrder(CONSOLE_ORDER.slice()));
+$('#layFaders').addEventListener('click', () => setOrder(['fader', 'pan', 'gain', 'eq', 'fx']));
+
+/* ---------- tape-head lamps
+   White while silence is under the head. Over the last three seconds before the clip reaches the head
+   the lamp darkens to deep blue and pulses as the clip starts; over the last three seconds of the clip
+   it lightens back to white and pulses as the clip leaves the head. Times are real seconds, so tape
+   speed is counted, and the ramps shorten when a clip or its gap is shorter than six seconds. */
+const LAMP_LIGHT = [247, 247, 242], LAMP_DARK = [12, 33, 92];
+function refreshLamps() {
+  const bar = $('#lamps'), tr = $('#lampTrack'); if (!bar) return;
+  tr.innerHTML = '';
+  bar.hidden = !S.tapes.length;
+  S.tapes.forEach((t, i) => {
+    t.ui.lamp = h('div', { class: 'lamp', role: 'img', 'aria-label': `Tape ${i + 1} head` });
+    t.ui.lampCell = h('div', { class: 'lamp-cell', title: t.name }, t.ui.lamp, h('div', { class: 'lamp-no' }, String(i + 1).padStart(2, '0') + ' · ' + t.name));
+    t._lamp = null;
+    tr.append(t.ui.lampCell);
+  });
+  syncLampScroll();
+}
+function syncLampScroll() { const c = $('#console'), tr = $('#lampTrack'); if (c && tr) tr.style.transform = `translateX(${-c.scrollLeft}px)`; }
+$('#console').addEventListener('scroll', syncLampScroll, { passive: true });
+(function trackTopBar() {
+  const top = document.querySelector('.top'); if (!top) return;
+  const set = () => document.documentElement.style.setProperty('--top-h', top.offsetHeight + 'px');
+  set(); if (window.ResizeObserver) new ResizeObserver(set).observe(top); else window.addEventListener('resize', set);
+})();
+function lampRead(t) {
+  if (!S.playing || !t.voice || !t.loopBuf || !AC) return null;
+  const L = t.loopBuf.duration, sp = Math.max(0.01, t.speed);
+  const s = t.mode === 'loop' ? 0 : visStart(t);
+  const D = t.mode === 'loop' ? L : Math.min(t.clip.duration, L);
+  const into = mod(phaseNow(t) - s, L);
+  const inside = into < D;
+  let level;
+  if (inside) { const ramp = Math.min(3, D / sp / 2); level = ramp > 0 ? clamp(((D - into) / sp) / ramp, 0, 1) : 1; }
+  else { const ramp = Math.min(3, (L - D) / sp / 2); level = ramp > 0 ? clamp(1 - ((L - into) / sp) / ramp, 0, 1) : 1; }
+  return { inside, into, level };
+}
+function lampPulse(el, kind) {
+  if (!el.animate || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  const c = kind === 'start' ? '61,123,255' : '255,255,255';
+  el.animate([
+    { transform: 'scale(1.3)', boxShadow: `0 0 0 0 rgba(${c},.95), 0 0 12px rgba(${c},.9)` },
+    { transform: 'scale(1)', boxShadow: `0 0 0 9px rgba(${c},0), 0 0 0 rgba(${c},0)` }
+  ], { duration: 520, easing: 'cubic-bezier(.2,.7,.3,1)' });
+}
+function updateLamps(now) {
+  for (const t of S.tapes) {
+    const el = t.ui && t.ui.lamp; if (!el) continue;
+    const r = lampRead(t), prev = t._lamp;
+    const level = r ? r.level : 0;
+    if (!prev || Math.abs(prev.level - level) > 0.004) {
+      const rgb = LAMP_LIGHT.map((a, j) => Math.round(a + (LAMP_DARK[j] - a) * level));
+      el.style.background = `rgb(${rgb.join(',')})`;
+    }
+    if (r && prev && prev.r && now - prev.at < 250) {
+      if (!prev.r.inside && r.inside) lampPulse(el, 'start');
+      else if (prev.r.inside && !r.inside) lampPulse(el, 'end');
+      else if (prev.r.inside && r.inside && r.into < prev.r.into - 1e-3) lampPulse(el, 'start');   // clip fills the tape: end and start meet
+    }
+    t.ui.lampCell.classList.toggle('muted', !!t.p.mute);
+    t._lamp = { level, r, at: now };
+  }
+}
+
 function refreshMixer() {
   const box = $('#strips'); box.innerHTML = '';
   S.tapes.forEach((t, i) => {
@@ -2180,29 +2357,35 @@ function refreshMixer() {
     sel.value = t.midiCh; sel.addEventListener('change', () => setStripChannel(t, +sel.value));
     t.ui.chSel = sel;
     t.ui.meter = meterEl();
+    const body = {
+      gain: () => [h('div', { class: 'kgrid one' }, k('trim'))],
+      eq: () => [h('div', { class: 'kgrid' }, k('hi'), k('mid'), k('midF'), k('lo'))],
+      fx: () => [h('div', { class: 'kgrid' }, k('drive'), k('verb'), k('echo'), k('echoTime'), k('echoFb'), k('speed'))],
+      pan: () => [h('div', { class: 'kgrid one' }, k('pan'))],
+      fader: () => [h('div', { class: 'faderzone' }, faderEl(`t${t.id}:vol`), t.ui.meter), ctlPot(`t${t.id}:vol`, 'bare'),
+        h('div', { class: 'ms' }, toggleEl(`t${t.id}:mute`, 'mute', 'M'), toggleEl(`t${t.id}:solo`, 'solo', 'S'))]
+    };
     box.append(h('div', { class: 'strip' },
       h('div', { class: 'strip-num' }, 'Tape ' + String(i + 1).padStart(2, '0')), t.ui.mixName,
       h('div', { class: 'chsel' }, h('span', {}, 'MIDI ch'), sel),
-      h('div', { class: 'sect' }, h('div', { class: 'kgrid one' }, k('trim'))),
-      h('div', { class: 'sect' }, h('span', { class: 'lbl' }, 'EQ'), h('div', { class: 'kgrid' }, k('hi'), k('mid'), k('midF'), k('lo'))),
-      h('div', { class: 'sect' }, h('span', { class: 'lbl' }, 'Effects bus'), h('div', { class: 'kgrid' }, k('drive'), k('verb'), k('echo'), k('echoTime'), k('echoFb'), k('speed'))),
-      h('div', { class: 'sect' }, h('div', { class: 'kgrid one' }, k('pan'))),
-      h('div', { class: 'faderzone' }, faderEl(`t${t.id}:vol`), t.ui.meter),
-      ctlPot(`t${t.id}:vol`, 'bare'),
-      h('div', { class: 'ms' }, toggleEl(`t${t.id}:mute`, 'mute', 'M'), toggleEl(`t${t.id}:solo`, 'solo', 'S'))
+      ...ML.order.map(key => mixSect(t, key, body[key]()))
     ));
   });
   MASTER_UI.meter = meterEl();
+  const mFader = mixSect(MASTER_UI, 'fader', [h('div', { class: 'faderzone' }, faderEl('m:vol'), MASTER_UI.meter), ctlPot('m:vol', 'bare')]);
+  const faderHigh = ML.order.indexOf('fader') < (ML.order.length - 1) / 2;
   box.append(h('div', { class: 'strip master' },
     h('div', { class: 'strip-num' }, 'Stereo bus'), h('div', { class: 'strip-name' }, 'Master'),
     h('div', { class: 'sect' }, h('span', { class: 'lbl' }, 'Transport'), h('div', { class: 'ms', style: 'grid-template-columns:1fr' }, toggleEl('m:play', 'solo', 'Play'))),
+    faderHigh ? mFader : null,
     h('div', { style: 'flex:1' }),
-    h('div', { class: 'faderzone' }, faderEl('m:vol'), MASTER_UI.meter),
-    ctlPot('m:vol', 'bare')
+    faderHigh ? null : mFader
   ));
   if (!S.tapes.length) box.prepend(h('div', { class: 'strip', style: 'width:220px;justify-content:center;color:var(--muted)' }, 'No tapes yet. Add sounds on the Deck tab and a channel strip appears here for each one.'));
   refreshMatrix();
   refreshBadges();
+  refreshLamps();
+  refreshLayoutBar();
 }
 function refreshStripChannels() { S.tapes.forEach(t => { if (t.ui.chSel) t.ui.chSel.value = t.midiCh; }); }
 const MASTER_UI = {};
@@ -2630,6 +2813,7 @@ function frame(now) {
     for (const t of S.tapes) if (t.ui && t.ui.meter) updateMeter(t.ui.meter, S.playing && t.ch ? t.ch.an : null);
     updateMeter(MASTER_UI.meter, S.playing && MASTER ? MASTER.an : null);
     for (const t of S.tapes) if (t.ui && t.ui.mxBar) updateBar(t.ui.mxBar, t.ch ? t.ch.mxAn : null);
+    updateLamps(now);
   }
   $('#counter').textContent = fmtTime(S.playing && AC ? AC.currentTime - S.t0 : 0);
   patFrame(); sdFrame();
