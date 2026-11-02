@@ -4297,7 +4297,11 @@ DL = DeckLink.deck({
 const SD_TYPES = {
   chord:   { name: 'Chord stab',     desc: 'Dub-chord stabs: minor 7ths, 9ths and 11ths, short and filtered, thrown into a dotted-8th echo.' },
   keys:    { name: 'Electric piano', desc: 'Rootless jazz voicings on an FM electric piano with a bark on the attack and a slow tremolo.' },
-  melody:  { name: 'Melody',         desc: 'A sparse, plinky line of FM blips, with plenty of space and echo.' },
+  piano:   { name: 'House piano',    desc: 'Bright, percussive piano comping ninths and elevenths in syncopated stabs, pushing ahead of the bar into each change and sometimes sliding in from a half step below.' },
+  organ:   { name: 'House organ',    desc: 'Percussive drawbar organ stabs with a key click and a spinning-speaker sway, riding the same pushed, offbeat comping as the piano.' },
+  poly:    { name: 'Synth poly',     desc: 'Chorused polysynth chords — brassy swells, wide detuned stabs or glassy FM keys — on straight eighths, stabs or held changes.' },
+  arp:     { name: 'Arpeggio',       desc: 'A sequenced arpeggio running through the chord tones on straight 16ths or 8ths, into a resonant filter that slowly opens and closes.' },
+  melody:{ name: 'Melody',         desc: 'A sparse, plinky line of FM blips, with plenty of space and echo.' },
   mallet:  { name: 'Vibes & mallets', desc: 'Vibraphone and marimba figures: soft struck tones, double-stops and a shimmer of tremolo.' },
   bass:    { name: 'Bassline',       desc: 'A round, rubbery bass that leans on the offbeats, with short notes and a tight filter.' },
   drone:   { name: 'Drone',          desc: 'A long detuned chord that breathes with slow filter and stereo movement.' },
@@ -4314,8 +4318,8 @@ const SD_LENS = [['b:0.25', '¼ bar'], ['b:0.5', '½ bar'], ['b:1', '1 bar'], ['
   ['s:1', '1 second'], ['s:2', '2 seconds'], ['s:4', '4 seconds'], ['s:8', '8 seconds'], ['s:15', '15 seconds'], ['s:30', '30 seconds']];
 const SD_SCALES = { dorian: { name: 'Dorian', s: [0, 2, 3, 5, 7, 9, 10] }, minor: { name: 'Minor', s: [0, 2, 3, 5, 7, 8, 10] },
   phrygian: { name: 'Phrygian', s: [0, 1, 3, 5, 7, 8, 10] }, pent: { name: 'Minor pentatonic', s: [0, 3, 5, 7, 10] },
-  lydian: { name: 'Lydian', s: [0, 2, 4, 6, 7, 9, 11] }, mpent: { name: 'Major pentatonic', s: [0, 2, 4, 7, 9] } };
-const SD_SUFFIX = { dorian: 'm', minor: 'm', pent: 'm', phrygian: ' phryg', lydian: ' lyd', mpent: '' };
+  lydian: { name: 'Lydian', s: [0, 2, 4, 6, 7, 9, 11] }, major: { name: 'Major', s: [0, 2, 4, 5, 7, 9, 11] }, mpent: { name: 'Major pentatonic', s: [0, 2, 4, 7, 9] } };
+const SD_SUFFIX = { dorian: 'm', minor: 'm', pent: 'm', phrygian: ' phryg', lydian: ' lyd', major: ' maj', mpent: '' };
 const SD_NOTONE = ['click', 'hats', 'texture', 'kick', 'clap'];
 const SD_CHOP_DIVS = [[0.25, '1/64'], [0.5, '1/32'], [1, '1/16'], [1.5, '1/16 dotted'], [2, '1/8'], [3, '1/8 dotted'], [4, '1/4'], [8, '1/2']];
 const SD_CHOP_MODES = [['stutter', 'Loop'], ['skip', 'Skip'], ['reverse', 'Rev'], ['warp', 'Warp'], ['mix', 'Mix']];
@@ -4456,7 +4460,13 @@ const SD_STYLES = {
   skip:    { name: 'Hairline', short: 'Hairline', scales: ['lydian', 'mpent', 'dorian', 'pent'],
     desc: 'Soft washes broken up by CD skips, buzzing repeats, dropouts and digital grit.', fn: styleSkip },
   wonky:   { name: 'Elastic', short: 'Elastic', scales: ['dorian', 'phrygian', 'mpent', 'minor', 'lydian'],
-    desc: 'Playful and elastic: squelchy FM, bending pitches, ratcheting notes, bit-crushed bits.', fn: styleWonky }
+    desc: 'Playful and elastic: squelchy FM, bending pitches, ratcheting notes, bit-crushed bits.', fn: styleWonky },
+  loft:    { name: 'Loft', short: 'Loft', scales: ['dorian', 'minor', 'dorian', 'major'],
+    desc: 'Classic house: bright piano and organ, lightly swung, clean and punchy with a little warmth.', fn: styleLoft,
+    set: { 4: ['piano', 'piano', 'organ', 'keys'], 5: ['arp', 'mallet', 'perc', 'melody'] } },
+  neon:    { name: 'Neon', short: 'Neon', scales: ['minor', 'major', 'dorian', 'minor'],
+    desc: 'Synth pop: straight time, chorused and wide, glossy echoes, nothing worn.', fn: styleNeon,
+    set: { 4: ['poly', 'poly', 'piano'], 5: ['arp', 'arp', 'melody', 'mallet'] } }
 };
 const SD_STYLE_KEYS = Object.keys(SD_STYLES);
 function sdHumanize(rec, r, amt) { for (const n of rec.notes) n.v = clamp(n.v * (1 - amt / 2 + r() * amt), 0.1, 1); }
@@ -4516,11 +4526,39 @@ function styleWonky(rec, r) {
   }
   sdHumanize(rec, r, 0.5);
 }
+function styleLoft(rec, r) {
+  const P = rec.patch, tonal = sdTonal(rec);
+  Object.assign(P, { muffle: rr(r, 11000, 17000), vinyl: rr(r, 0, 0.04), wow: rr(r, 0, 0.04), flutter: 0, chop: P.chop * 0.3,
+    'crush.bits': 16, 'crush.sr': pick(r, [44100, 44100, 32000]), drive: Math.max(P.drive, rr(r, 0.08, 0.2)), swing: rr(r, 0.1, 0.2), 'dly.mix': P['dly.mix'] * 0.6 });
+  if (tonal && !['bass', 'drone', 'orch'].includes(rec.type)) Object.assign(P, { 'vcf.cut': Math.min(16000, P['vcf.cut'] * rr(r, 1.1, 1.5)), width: Math.min(P.width, 0.4) });
+  // now and then the bass becomes a short, percussive organ bass
+  if (rec.type === 'bass' && r() < 0.4) Object.assign(P, { 'o1.wave': 'sine', 'o2.wave': 'sine', 'o2.oct': 1, 'o2.semi': 0, 'o2.fine': 0, 'o2.lvl': rr(r, 0.25, 0.4), sub: 0.3,
+    fm: 0, 'fm.env': rr(r, 0.8, 1.4), 'fm.dec': 0.006, 'ae.d': rr(r, 0.2, 0.35), 'ae.s': 0.3, 'vcf.cut': rr(r, 900, 1600), 'vcf.env': 0.5, 'pe.amt': 0 });
+  sdHumanize(rec, r, 0.2);
+}
+function styleNeon(rec, r) {
+  const P = rec.patch, tonal = sdTonal(rec);
+  Object.assign(P, { swing: 0, muffle: 20000, vinyl: 0, wow: 0, flutter: 0, chop: P.chop * 0.2, 'crush.bits': 16, 'crush.sr': 44100, 'dly.pp': true });
+  if (tonal && rec.type !== 'bass') Object.assign(P, { ens: Math.max(P.ens, rr(r, 0.15, 0.35)), width: Math.max(P.width, rr(r, 0.5, 0.8)),
+    'dly.time': pick(r, [3, 4, 6]), 'dly.mix': Math.max(P['dly.mix'], rr(r, 0.12, 0.25)), 'vcf.cut': Math.min(16000, P['vcf.cut'] * rr(r, 1, 1.4)) });
+  if (rec.type === 'kick') Object.assign(P, { 'pe.amt': Math.max(P['pe.amt'], 30), drive: Math.max(P.drive, 0.15) });
+  // the bass often turns into straight octave eighths on the root
+  if (rec.type === 'bass' && r() < 0.6) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), lo = sdDeg(rec, 0, 36), move = pick(r, [4, 3, -2, 5]);
+    rec.notes = [];
+    for (let s = 0; s < steps; s += 2) {
+      const last = s >= steps - 2 && steps >= 16 && r() < 0.5;
+      rec.notes.push({ s, d: 1.2, v: s % 4 === 0 ? 1 : rr(r, 0.7, 0.85), n: [last ? sdDeg(rec, move, 36) : lo + (s % 4 === 2 && r() < 0.7 ? 12 : 0)] });
+    }
+    Object.assign(P, { 'o1.wave': 'sawtooth', 'o2.wave': 'square', 'o2.lvl': rr(r, 0.2, 0.4), 'vcf.cut': rr(r, 350, 700), 'vcf.env': rr(r, 1.5, 2.5), 'fe.d': rr(r, 0.06, 0.12), 'ae.s': 0.5, 'pe.amt': 0 });
+  }
+}
 function sdGenerate(o) {
   const seed = (o.seed >>> 0) || (Math.random() * 4294967295 >>> 0) || 1, r = rng(seed);
   const style = SD_STYLES[o.style] ? o.style : pick(r, SD_STYLE_KEYS), st = SD_STYLES[style];
   const rec = { v: 1, type: o.type, style, seed, len: o.len, bpm: o.bpm, bpb: o.bpb, loop: o.loop, notes: [], patch: sdDefaults() };
-  const scales = st.scales || { chord: ['dorian', 'minor', 'dorian'], keys: ['dorian', 'minor', 'lydian'], melody: ['dorian', 'pent', 'minor', 'phrygian'], mallet: ['dorian', 'mpent', 'pent', 'lydian'], bass: ['dorian', 'minor', 'pent'], drone: ['dorian', 'minor', 'phrygian'], orch: ['minor', 'dorian', 'lydian', 'minor'], frags: ['lydian', 'dorian', 'pent'] }[o.type] || ['dorian', 'minor'];
+  const scales = st.scales || { chord: ['dorian', 'minor', 'dorian'], keys: ['dorian', 'minor', 'lydian'], melody: ['dorian', 'pent', 'minor', 'phrygian'], mallet: ['dorian', 'mpent', 'pent', 'lydian'], bass: ['dorian', 'minor', 'pent'], drone: ['dorian', 'minor', 'phrygian'], orch: ['minor', 'dorian', 'lydian', 'minor'], frags: ['lydian', 'dorian', 'pent'],
+    piano: ['dorian', 'minor', 'dorian', 'major'], organ: ['dorian', 'minor', 'minor'], poly: ['minor', 'major', 'dorian'], arp: ['minor', 'major', 'dorian', 'minor'] }[o.type] || ['dorian', 'minor'];
   rec.root = o.root === 'auto' ? pick(r, [9, 2, 4, 5, 7, 0, 11]) : +o.root;
   rec.scale = o.scale === 'auto' ? pick(r, scales) : o.scale;
   SD_GEN[o.type](rec, r);
@@ -4536,7 +4574,175 @@ function sdChord(rec, d, count, lo, hi, r) {
   for (let k = 0; k < count; k++) { if (k === 2 && count > 4 && r() < 0.5) continue; let m = sdDeg(rec, d + k * 2, 48); while (m > hi) m -= 12; while (m < lo) m += 12; if (!notes.includes(m)) notes.push(m); }
   return notes.sort((a, b) => a - b);
 }
+/* ---------- comping: jazz voicings, voice leading and pushed rhythms for piano, organ and polysynth ---------- */
+// voicing shapes as scale-step offsets from the chord's root degree; 'min' shapes only go on minor chords
+const SD_SHAPES = {
+  nine: [2, 4, 6, 8],        // 3 5 7 9, rootless
+  shell9: [2, 6, 8],         // 3 7 9
+  eleven: [2, 6, 8, 10],     // 3 7 9 11
+  quartal: [0, 3, 6, 9],     // stacked fourths
+  seven: [2, 4, 6],          // 3 5 7
+  triad: [0, 2, 4], add9: [0, 2, 4, 8], sus: [0, 3, 4, 8]
+};
+const SD_SHAPE_MIN = ['eleven', 'quartal'];
+function sdShape(rec, d, r, pool) {
+  const sc = SD_SCALES[rec.scale].s;
+  if (sc.length < 7) return pick(r, [[1, 2, 3, 4], [1, 3, 4, 6], [0, 2, 3, 4]]);   // pentatonic: stacked scale tones
+  const third = mod(sdDeg(rec, d + 2, 0) - sdDeg(rec, d, 0), 12), fifth = mod(sdDeg(rec, d + 4, 0) - sdDeg(rec, d, 0), 12);
+  if (fifth !== 7) return SD_SHAPES.seven;   // diminished: keep it plain
+  const fourth = mod(sdDeg(rec, d + 3, 0) - sdDeg(rec, d, 0), 12);
+  const ok = pool.filter(k => (third === 3 || !SD_SHAPE_MIN.includes(k)) && (k !== 'sus' || fourth === 5));
+  return SD_SHAPES[pick(r, ok.length ? ok : ['seven'])];
+}
+/* the inversion (and octave) whose top note sits nearest the target, inside lo..hi */
+function sdInvert(notes, target, lo, hi) {
+  let best = null, cost = Infinity;
+  for (let i = 0; i < notes.length; i++) {
+    const inv = notes.map((m, k) => k < i ? m + 12 : m).sort((a, b) => a - b);
+    for (let o = -36; o <= 36; o += 12) {
+      const v = inv.map(m => m + o), top = v[v.length - 1];
+      if (v[0] < lo || top > hi) continue;
+      const c = Math.abs(top - target) + (top - v[0] > 19 ? 4 : 0);
+      if (c < cost) { cost = c; best = v; }
+    }
+  }
+  if (best) return best;
+  const v = notes.slice(); while (v[v.length - 1] > hi) for (let k = 0; k < v.length; k++) v[k] -= 12;
+  return v;
+}
+// two-bar rhythms in 16ths, [step, length]; bar two starts at 16
+const SD_HOUSE_COMPS = [
+  [[0, 2], [3, 1], [6, 2], [10, 1], [12, 2], [14, 2], [19, 1], [22, 2], [26, 2], [30, 2]],
+  [[2, 1], [6, 1], [10, 1], [14, 2], [18, 1], [22, 1], [26, 1], [30, 2]],
+  [[0, 3], [3, 3], [6, 2], [10, 2], [14, 2], [16, 3], [19, 3], [22, 2], [27, 1], [30, 2]],
+  [[0, 4], [6, 1], [10, 2], [14, 2], [22, 1], [24, 2], [27, 1], [30, 2]],
+  [[3, 1], [6, 2], [11, 1], [14, 2], [19, 1], [22, 2], [27, 1], [30, 2]],
+  [[0, 2], [7, 1], [10, 3], [14, 2], [16, 2], [23, 1], [26, 1], [28, 1], [30, 2]],
+  [[0, 1], [3, 2], [7, 1], [10, 2], [14, 2], [18, 1], [20, 2], [23, 1], [26, 4]]
+];
+const SD_POP_COMPS = [
+  Array.from({ length: 16 }, (_, i) => [i * 2, 1.5]),                       // driving eighths
+  [[0, 3], [6, 2], [10, 2], [12, 4], [16, 3], [22, 2], [26, 6]],
+  [[0, 6], [6, 4], [10, 6], [16, 6], [22, 4], [26, 2], [28, 2], [30, 2]],
+  [[0, 14], [14, 2], [16, 12], [28, 4]],                                   // held, pushed into the next chord
+  Array.from({ length: 8 }, (_, i) => [i * 4 + 2, 1.5]).concat([[0, 1.5], [16, 1.5]])
+];
+function sdCompHits(r, steps, spb, pat, drop) {
+  const out = [], bars = Math.ceil(steps / spb);
+  for (let b = 0; b < bars; b++) {
+    const half = (b % 2) * 16, base = b * spb;
+    for (const [st, d] of pat) {
+      if (st < half || st >= half + 16) continue;
+      const loc = st - half, s = base + loc;
+      if (loc >= spb || s >= steps) continue;
+      if (loc > 0 && r() < drop) continue;
+      out.push([s, d]);
+    }
+  }
+  if (!out.length) out.push([0, 2]);
+  return out.sort((a, b) => a[0] - b[0]);
+}
+function sdProgs(rec, kind) {
+  const sc = SD_SCALES[rec.scale].s, maj = sc.length >= 7 ? mod(sdDeg(rec, 2, 0) - rec.root, 12) === 4 : rec.scale === 'mpent';
+  if (sc.length < 7) return [[0], [0, 3], [0, 2], [0, 3, 2, 0]];
+  if (kind === 'pop') return maj ? [[0, 4, 5, 3], [5, 3, 0, 4], [0, 3, 4, 3], [0, 5, 3, 4], [3, 4, 0, 0], [0, 0, 3, 4]]
+    : [[0, 5, 2, 6], [0, 5, 3, 4], [0, 3, 5, 4], [0, -2, -3, -2], [0, 5], [0, 2, 5, 6]];
+  return maj ? [[1, 4], [0, 3], [1, 4, 0, 0], [5, 1, 4, 0], [0, 5, 1, 4], [3, 2, 1, 0], [3, 4]]
+    : [[0, 3], [0, -2], [0, 4], [0, 3, 1, 4], [0, 5, 3, 4], [0, 0, 3, 3], [0, -2, -3, -2], [1, 4, 0, 0], [0, -1]];
+}
+/* lays chords over a rhythm: voice-led top line, pushes into the next change, left-hand roots, half-step slides */
+function sdComp(rec, r, o) {
+  const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4;
+  let prog, chordSteps;
+  if (steps <= spb) { prog = pick(r, [[0], [0], ...sdProgs(rec, o.kind).filter(p => p.length === 2)]); chordSteps = Math.max(1, steps / prog.length); }
+  else { prog = pick(r, sdProgs(rec, o.kind)); chordSteps = Math.max(spb, Math.floor(steps / prog.length / spb) * spb); }
+  // one voicing per chord, each led smoothly from the one before
+  let top = Math.round(rr(r, o.lo + 14, o.hi - 2));
+  const voic = prog.map(d => {
+    const base = sdShape(rec, d, r, o.shapes).map(k => sdDeg(rec, d + k, 48));
+    const v = sdInvert(base, top, o.lo, o.hi); top = v[v.length - 1];
+    return { d, base, v };
+  });
+  const hits = sdCompHits(r, steps, spb, pick(r, o.rhythms), o.drop);
+  const starts = new Set(hits.map(h => h[0]));
+  for (const [s, dur] of hits) {
+    const loc = s % chordSteps, pushed = chordSteps >= 8 && loc >= chordSteps - 2 && r() < o.push;
+    const ci = Math.floor((pushed ? s + chordSteps - loc : s) / chordSteps) % prog.length, ch = voic[ci];
+    // now and then the top voice steps to a neighbouring inversion, so the stabs carry a little line
+    let notes = r() < o.move ? sdInvert(ch.base, ch.v[ch.v.length - 1] + pick(r, [-5, -3, 3, 4]), o.lo, o.hi) : ch.v.slice();
+    const accent = loc === 0 || pushed, v = accent ? rr(r, 0.85, 1) : rr(r, 0.55, 0.85);
+    if (o.slide && accent && s >= 1 && !starts.has(s - 1) && r() < o.slide)
+      rec.notes.push({ s: s - 0.5, d: 0.45, v: v * 0.6, n: notes.map(m => m - 1) });
+    if (o.lh && accent && r() < o.lh) { let b = sdDeg(rec, ch.d, 36); while (b < o.lhLo) b += 12; while (b >= o.lhLo + 12) b -= 12; notes = [b, ...notes]; }
+    rec.notes.push({ s, d: dur * o.durMul, v, n: notes });
+  }
+  rec.notes.sort((a, b) => a.s - b.s);
+  // a new stab lifts the hand off the one before
+  rec.notes.forEach((n, i) => { const nx = rec.notes[i + 1]; if (nx) n.d = Math.max(0.25, Math.min(n.d, nx.s - n.s)); });
+}
 const SD_GEN = {
+  piano(rec, r) {
+    sdComp(rec, r, { kind: 'house', shapes: ['nine', 'nine', 'shell9', 'eleven', 'eleven', 'quartal', 'seven'], rhythms: SD_HOUSE_COMPS,
+      lo: 53, hi: 81, drop: 0.07, push: 0.75, move: 0.25, slide: 0.22, lh: 0.55, lhLo: 41, durMul: rr(r, 0.8, 1.2) });
+    const P = rec.patch, v = pick(r, ['bright', 'bright', 'warm', 'hollow']);
+    Object.assign(P, { width: rr(r, 0.15, 0.3), scatter: rr(r, 0, 0.1), 'vcf.type': 'lowpass', 'vcf.res': 0.05, 'vcf.kt': 0.6, 'fe.a': 0.001, 'fe.s': 0, 'fe.r': 0.2,
+      'ae.a': 0.001, 'ae.r': rr(r, 0.12, 0.25), 'vca.vel': 0.65, drive: rr(r, 0.05, 0.2),
+      'dly.mix': rr(r, 0.05, 0.16), 'dly.time': pick(r, [3, 3, 6]), 'dly.fb': 0.3, 'dly.tone': 3000, swing: rr(r, 0.08, 0.18) });
+    if (v === 'bright') Object.assign(P, { 'o1.wave': 'triangle', 'o1.lvl': 0.85, 'o2.wave': 'sine', 'o2.oct': 1, 'o2.semi': 0, 'o2.fine': rr(r, 2, 5), 'o2.lvl': rr(r, 0.2, 0.35),
+      fm: rr(r, 0.3, 0.6), 'fm.env': rr(r, 3, 6), 'fm.dec': rr(r, 0.03, 0.08), 'vcf.cut': rr(r, 3500, 6500), 'vcf.env': rr(r, 1, 1.8), 'fe.d': rr(r, 0.15, 0.3), 'ae.d': rr(r, 0.45, 0.9), 'ae.s': rr(r, 0.06, 0.14) });
+    if (v === 'warm') Object.assign(P, { 'o1.wave': 'sine', 'o1.lvl': 0.9, 'o2.wave': 'sine', 'o2.oct': 0, 'o2.semi': 0, 'o2.fine': 0, 'o2.lvl': 0,
+      fm: rr(r, 0.5, 1), 'fm.env': rr(r, 2, 4), 'fm.dec': rr(r, 0.08, 0.2), ens: 0.12, 'vcf.cut': rr(r, 2500, 4000), 'vcf.env': 0.8, 'fe.d': 0.3, 'ae.d': rr(r, 0.8, 1.5), 'ae.s': 0.12 });
+    if (v === 'hollow') Object.assign(P, { 'o1.wave': 'square', 'o1.lvl': 0.5, 'o2.wave': 'sine', 'o2.oct': 1, 'o2.semi': 0, 'o2.fine': 0, 'o2.lvl': 0.3,
+      fm: 0, 'fm.env': rr(r, 1.5, 3), 'fm.dec': 0.02, 'vcf.cut': rr(r, 2000, 3500), 'vcf.env': rr(r, 1.5, 2.5), 'fe.d': rr(r, 0.08, 0.15), 'ae.d': rr(r, 0.35, 0.6), 'ae.s': 0.1 });
+  },
+  organ(rec, r) {
+    sdComp(rec, r, { kind: 'house', shapes: ['seven', 'shell9', 'triad', 'quartal'], rhythms: SD_HOUSE_COMPS,
+      lo: 52, hi: 76, drop: 0.1, push: 0.7, move: 0.15, slide: 0.12, lh: 0.4, lhLo: 41, durMul: rr(r, 0.7, 1.1) });
+    Object.assign(rec.patch, { 'o1.wave': 'sine', 'o1.lvl': 0.8, 'o2.wave': 'sine', 'o2.oct': 1, 'o2.semi': 0, 'o2.fine': 0, 'o2.lvl': rr(r, 0.35, 0.55), sub: rr(r, 0, 0.2),
+      fm: 0, 'fm.env': rr(r, 0.8, 1.6), 'fm.dec': rr(r, 0.005, 0.012), width: 0.15,
+      'vcf.type': 'lowpass', 'vcf.cut': rr(r, 2500, 4500), 'vcf.res': 0.05, 'vcf.kt': 0.4, 'vcf.env': 0.3, 'fe.d': 0.1, 'fe.s': 0,
+      'ae.a': 0.002, 'ae.d': rr(r, 0.25, 0.5), 'ae.s': rr(r, 0.3, 0.55), 'ae.r': rr(r, 0.05, 0.1), 'vca.vel': 0.5, drive: rr(r, 0.2, 0.4),
+      'lfo2.dest': 'pan', 'lfo2.wave': 'sine', 'lfo2.sync': false, 'lfo2.hz': rr(r, 5.5, 7), 'lfo2.depth': rr(r, 0.08, 0.2),
+      'dly.mix': rr(r, 0, 0.1), 'dly.time': 3, 'dly.fb': 0.25, 'dly.tone': 2500, swing: rr(r, 0.08, 0.18) });
+  },
+  poly(rec, r) {
+    sdComp(rec, r, { kind: 'pop', shapes: ['triad', 'triad', 'add9', 'seven', 'sus'], rhythms: SD_POP_COMPS,
+      lo: 52, hi: 77, drop: 0.04, push: 0.5, move: 0.1, slide: 0, lh: 0.7, lhLo: 43, durMul: 1 });
+    const P = rec.patch, v = pick(r, ['brass', 'wide', 'glass']);
+    Object.assign(P, { 'vcf.type': 'lowpass', 'dly.mix': rr(r, 0.12, 0.25), 'dly.time': pick(r, [3, 4, 6]), 'dly.fb': 0.35, 'dly.tone': 4000, 'dly.pp': true,
+      drive: rr(r, 0, 0.12), swing: 0, scatter: 0 });
+    if (v === 'brass') Object.assign(P, { 'o1.wave': 'sawtooth', 'o1.lvl': 0.7, 'o2.wave': 'sawtooth', 'o2.fine': rr(r, 6, 12), 'o2.lvl': 0.6, ens: rr(r, 0.2, 0.4), width: rr(r, 0.5, 0.7),
+      'vcf.cut': rr(r, 700, 1400), 'vcf.res': rr(r, 0.1, 0.3), 'vcf.kt': 0.4, 'vcf.env': rr(r, 2, 3.5), 'fe.a': rr(r, 0.01, 0.04), 'fe.d': rr(r, 0.2, 0.4), 'fe.s': 0.35, 'fe.r': 0.25,
+      'ae.a': rr(r, 0.005, 0.02), 'ae.d': 0.5, 'ae.s': 0.7, 'ae.r': rr(r, 0.15, 0.3), 'vca.vel': 0.4 });
+    if (v === 'wide') Object.assign(P, { 'o1.wave': 'sawtooth', 'o1.lvl': 0.7, 'o2.wave': 'square', 'o2.oct': -1, 'o2.fine': 0, 'o2.lvl': 0.35, ens: rr(r, 0.4, 0.6), width: 0.8,
+      'vcf.cut': rr(r, 1200, 2400), 'vcf.res': rr(r, 0.15, 0.35), 'vcf.kt': 0.4, 'vcf.env': rr(r, 1, 2), 'fe.d': 0.3, 'fe.s': 0.3,
+      'ae.a': 0.003, 'ae.d': 0.4, 'ae.s': 0.6, 'ae.r': 0.2, 'vca.vel': 0.4,
+      'lfo1.dest': 'pitch', 'lfo1.wave': 'sine', 'lfo1.sync': false, 'lfo1.hz': rr(r, 4, 5.5), 'lfo1.depth': 0.004 });
+    if (v === 'glass') Object.assign(P, { 'o1.wave': 'sine', 'o1.lvl': 0.9, 'o2.wave': 'sine', 'o2.oct': 1, 'o2.semi': 7, 'o2.fine': 0, 'o2.lvl': 0,
+      fm: rr(r, 0.4, 0.9), 'fm.env': rr(r, 3, 6), 'fm.dec': rr(r, 0.1, 0.3), ens: 0.15, width: 0.5,
+      'vcf.cut': 8000, 'vcf.res': 0.05, 'vcf.env': 0, 'ae.a': 0.001, 'ae.d': rr(r, 0.6, 1.2), 'ae.s': 0.15, 'ae.r': 0.3, 'vca.vel': 0.6 });
+  },
+  arp(rec, r) {
+    const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch, seven = SD_SCALES[rec.scale].s.length >= 7;
+    const prog = steps <= spb ? [0] : pick(r, sdProgs(rec, 'pop'));
+    const chordSteps = Math.max(spb, Math.floor(steps / prog.length / spb) * spb);
+    const rate = pick(r, [1, 1, 1, 2]), order = pick(r, ['up', 'down', 'updown', 'pedal', 'skip']), octs = pick(r, [1, 2, 2]);
+    const offs = seven ? (r() < 0.35 ? [0, 2, 4, 6] : [0, 2, 4]) : [0, 1, 2, 3];
+    let k = 0;
+    for (let s = 0; s < steps; s += rate, k++) {
+      const d = prog[Math.floor(s / chordSteps) % prog.length], tones = [];
+      for (let o = 0; o < octs; o++) for (const x of offs) tones.push(sdDeg(rec, d + x, octs === 2 ? 48 : 60) + 12 * o);
+      const n = tones.length, ud = k % Math.max(1, 2 * n - 2);
+      const m = order === 'up' ? tones[k % n] : order === 'down' ? tones[n - 1 - k % n] : order === 'updown' ? tones[ud < n ? ud : 2 * n - 2 - ud]
+        : order === 'pedal' ? (k % 2 ? tones[1 + (k >> 1) % (n - 1)] : tones[0]) : tones[(k * 2 + Math.floor(k * 2 / n)) % n];
+      rec.notes.push({ s, d: rate * 0.75, v: s % 4 === 0 ? 1 : rr(r, 0.6, 0.85), n: [m] });
+    }
+    Object.assign(P, { 'o1.wave': pick(r, ['square', 'sawtooth']), 'o1.lvl': 0.8, 'o2.wave': pick(r, ['square', 'sawtooth']), 'o2.oct': pick(r, [0, 1]), 'o2.fine': rr(r, 4, 9), 'o2.lvl': rr(r, 0.2, 0.4),
+      width: rr(r, 0.2, 0.4), 'vcf.type': 'lowpass', 'vcf.cut': rr(r, 700, 1800), 'vcf.res': rr(r, 0.35, 0.65), 'vcf.kt': 0.5, 'vcf.env': rr(r, 1.5, 3), 'fe.d': rr(r, 0.06, 0.16), 'fe.s': 0,
+      'ae.a': 0.002, 'ae.d': rr(r, 0.12, 0.25), 'ae.s': 0.25, 'ae.r': 0.06, 'vca.vel': 0.5,
+      'lfo1.dest': 'cutoff', 'lfo1.wave': pick(r, ['sine', 'triangle']), 'lfo1.sync': true, 'lfo1.div': pick(r, [16, 32, 64]), 'lfo1.depth': rr(r, 0.15, 0.35),
+      'dly.mix': rr(r, 0.2, 0.38), 'dly.time': pick(r, [3, 3, 6]), 'dly.fb': rr(r, 0.35, 0.55), 'dly.tone': 3500, 'dly.pp': true, swing: 0 });
+  },
   keys(rec, r) {
     const steps = Math.floor(sdSteps(rec) + 1e-6), spb = rec.bpb * 4, P = rec.patch;
     const prog = steps <= spb ? [0] : pick(r, [[0, 3], [0, -2], [1, 4], [0, 5], [0, 3, 1, 4], [0, -1, 1, 0]]);
@@ -5118,8 +5324,8 @@ const SD_SET_ROLES = [
   { types: ['clap'], p: { vol: -9, verb: 0.15, pan: 0.05 } },
   { types: ['hats', 'hats', 'click'], p: { vol: -11, pan: 0.15 } },
   { types: ['bass'], p: { vol: -6 } },
-  { types: ['chord', 'keys', 'drone', 'orch', 'chord', 'keys'], p: { vol: -10, verb: 0.25, pan: -0.1 } },
-  { types: ['melody', 'mallet', 'frags', 'perc', 'texture'], p: { vol: -13, pan: -0.3, verb: 0.2 } }
+  { types: ['chord', 'keys', 'drone', 'orch', 'chord', 'keys', 'piano'], p: { vol: -10, verb: 0.25, pan: -0.1 } },
+  { types: ['melody', 'mallet', 'frags', 'perc', 'texture', 'arp'], p: { vol: -13, pan: -0.3, verb: 0.2 } }
 ];
 // patterns by tape index: 0 kick, 1 clap, 2 hats/clicks, 3 bass, 4 harmony, 5 color
 const SD_SET_PADS = [['Intro', [4, 5]], ['Groove', [0, 2, 3, 4]], ['Full', [0, 1, 2, 3, 4, 5]], ['Break', [2, 4, 5]]];
@@ -5137,7 +5343,7 @@ async function sdGenerateSet() {
     for (const [i, role] of SD_SET_ROLES.entries()) {
       sdStatus(`Rendering set · ${i + 1} of ${SD_SET_ROLES.length}…`);
       await new Promise(res => setTimeout(res, 0));
-      const rec = sdGenerate(Object.assign({}, o, { type: pick(r, role.types), style, root: String(root), scale }));
+      const rec = sdGenerate(Object.assign({}, o, { type: pick(r, (SD_STYLES[style].set || {})[i] || role.types), style, root: String(root), scale }));
       recs.push(rec); bufs.push(await sdRender(rec));
     }
     sdStopAudition();
@@ -5229,7 +5435,7 @@ function sdLfoModule(k, n) {
 }
 function sdTypeDesc() {
   const st = SD_STYLES[$('#sdStyle').value];
-  $('#sdDesc').textContent = SD_TYPES[$('#sdType').value].desc + ' ' + (st ? st.desc : 'Style: any of the five, picked at random each time.');
+  $('#sdDesc').textContent = SD_TYPES[$('#sdType').value].desc + ' ' + (st ? st.desc : `Style: any of the ${SD_STYLE_KEYS.length}, picked at random each time.`);
 }
 function sdBuild() {
   const lenSel = $('#sdLen');
