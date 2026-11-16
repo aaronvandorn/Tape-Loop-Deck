@@ -456,7 +456,7 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
     <section class="matrix" aria-labelledby="mxTitle">
       <div class="mx-head">
         <h2 id="mxTitle">Matrix</h2>
-        <span class="tape-meta">Send any channel into any other, or back into itself. Sends leave after the fader and enter the destination ahead of its gain, EQ and effects, so feedback runs through the whole strip. Each return has its own delay, and a soft limiter keeps runaway loops from clipping.</span>
+        <span class="tape-meta">Send any channel into any other, or back into itself. Sends leave ahead of the fader (after EQ and drive), so the matrix alone sets how hard a loop rings and the fader sets how loud you hear it. A muted tape stops sending. Returns enter the destination ahead of its gain, EQ and effects, so feedback runs through the whole strip. Around 0 dB a self-send sits at the edge of sustaining; above it the loop rings, and a soft limiter keeps it below full scale.</span>
         <div id="mxMaster" style="display:flex;align-items:flex-end;gap:14px"></div>
         <button class="btn small" id="mxClear">Clear all sends</button>
       </div>
@@ -1411,6 +1411,9 @@ function buildChannel(ctx, dest, impulse) {
   n.shaper.connect(n.fader); n.fader.connect(n.pan); n.pan.connect(n.mute); n.mute.connect(dest);
   n.fader.connect(n.echoSend); n.echoSend.connect(n.delay); n.delay.connect(n.fbFilter); n.fbFilter.connect(n.fb); n.fb.connect(n.delay); n.fbFilter.connect(n.pan);
   n.fader.connect(n.verbSend); n.verbSend.connect(n.conv); n.conv.connect(n.verbRet); n.verbRet.connect(n.pan);
+  // matrix send: taken ahead of the fader (after EQ and drive) so a loop's gain is set by the matrix, not by how loud the strip is;
+  // its own gate follows mute and solo so a silenced tape stops feeding the matrix too
+  n.mxSend = ctx.createGain(); n.shaper.connect(n.mxSend);
   // matrix return: summed sends → delay (every feedback loop needs one) → soft limiter → into the strip ahead of its gain
   n.mxIn = ctx.createGain(); n.mxDelay = ctx.createDelay(2.1); n.mxPre = ctx.createGain(); n.mxPre.gain.value = 0.25;
   n.mxClip = ctx.createWaveShaper(); n.mxClip.curve = MX_CLIP; n.mxClip.oversample = '2x';
@@ -1418,8 +1421,9 @@ function buildChannel(ctx, dest, impulse) {
   n._drive = -1;
   return n;
 }
-/* soft limiter for matrix returns: unity for small signals, saturates smoothly toward ±1 */
-const MX_CLIP = (() => { const N = 2049, c = new Float32Array(N); for (let i = 0; i < N; i++) { const u = i / (N - 1) * 2 - 1; c[i] = Math.tanh(u * 4); } return c; })();
+/* soft limiter for matrix returns: unity for small signals, saturates smoothly toward ±0.5 (−6 dBFS),
+   so a loop pushed past unity settles at a level that grows with the send instead of slamming into full scale */
+const MX_CLIP = (() => { const N = 2049, c = new Float32Array(N); for (let i = 0; i < N; i++) { const u = i / (N - 1) * 2 - 1; c[i] = 0.5 * Math.tanh(u * 8); } return c; })();
 /* master safety clip: linear up to -2 dBFS, then a soft knee to a hard ceiling at 0 dBFS */
 const SAFETY_CURVE = (() => { const N = 4097, c = new Float32Array(N), K = 0.8, R = 0.2; for (let i = 0; i < N; i++) { const x = (i / (N - 1) * 2 - 1) * 2, a = Math.abs(x); c[i] = Math.sign(x) * (a <= K ? a : K + R * Math.tanh((a - K) / R)); } return c; })();
 function makeSafety(ctx) {
@@ -1437,8 +1441,8 @@ function wireMatrix(ctx, chans) {
   const nodes = new Map();
   for (const A of chans) for (const B of chans) {
     const g = ctx.createGain(); g.gain.value = cellGain(A.t.id, B.t.id);
-    A.n.pan.connect(g); g.connect(B.n.mxIn);
-    nodes.set(mxKey(A.t.id, B.t.id), { g, from: A.n.pan });
+    A.n.mxSend.connect(g); g.connect(B.n.mxIn);
+    nodes.set(mxKey(A.t.id, B.t.id), { g, from: A.n.mxSend });
   }
   return nodes;
 }
@@ -1467,7 +1471,7 @@ function applyParams(n, t, ctx, solo, instant) {
   set(n.fader.gain, faderGain(p.vol)); set(n.pan.pan, p.pan);
   set(n.echoSend.gain, p.echo); set(n.delay.delayTime, p.echoTime); set(n.fb.gain, p.echoFb); set(n.verbSend.gain, p.verb);
   const on = !p.mute && (!solo || p.solo);
-  set(n.mute.gain, on ? 1 : 0);
+  set(n.mute.gain, on ? 1 : 0); set(n.mxSend.gain, on ? 1 : 0);
   set(n.mxDelay.delayTime, p.mxDelay);
   if (ctx === AC && (!t._gateAhead || ctx.currentTime >= t._gateAhead)) linkGate(t, on, now, instant ? 0 : 0.036);
 }
@@ -1479,7 +1483,7 @@ function attachChannel(t) {
 }
 function detachChannel(t) {
   if (!t.ch) return;
-  for (const k of ['mute', 'fbFilter', 'verbRet', 'input', 'pan', 'mxClip', 'mxIn']) { try { t.ch[k].disconnect(); } catch (e) {} }
+  for (const k of ['mute', 'fbFilter', 'verbRet', 'input', 'pan', 'mxSend', 'mxClip', 'mxIn']) { try { t.ch[k].disconnect(); } catch (e) {} }
   t.ch = null;
 }
 function applyChannel(t) { if (AC && t.ch) applyParams(t.ch, t, AC, anySolo(), false); }
@@ -3061,7 +3065,7 @@ async function buildStudio() {
       { name: 'Bell figure', clip: bells, mode: 'loop', note: 76, p: { vol: -7, echo: 0.32, echoTime: 0.43, echoFb: 0.42, verb: 0.3, pan: 0.35, drive: 0.15 } },
       { name: 'Low drone', clip: drone, mode: 'pad', tapeLen: 13, offset: 1, note: 38, p: { vol: -5, pan: -0.25, lo: 3, verb: 0.15, mxDelay: 0.12 } }
     ],
-    mx: [[1, 2, -14]]   // the bells ring on through the drone's channel
+    mx: [[1, 2, -21]]   // the bells ring on through the drone's channel
   };
 }
 async function buildNature() {
@@ -3075,7 +3079,7 @@ async function buildNature() {
       { name: 'Crickets', clip: crickets, mode: 'loop', note: 96, p: { vol: -13, pan: -0.35, verb: 0.25 } },
       { name: 'Distant thunder', clip: thunder, mode: 'pad', tapeLen: 31, offset: 9, note: 28, p: { vol: -1, lo: 3, verb: 0.55 } }
     ],
-    mx: [[5, 2, -12]]   // thunder rolls on through the wind
+    mx: [[5, 2, -13]]   // thunder rolls on through the wind
   };
 }
 async function buildMicro() {
@@ -3090,7 +3094,7 @@ async function buildMicro() {
       { name: 'Blips', clip: blips, mode: 'loop', note: 81, p: { vol: -11, pan: 0.3, echo: 0.35, echoTime: dot8, echoFb: 0.45, verb: 0.3 } },
       { name: 'Drone', clip: drone, mode: 'loop', note: 45, p: { vol: -8, lo: 2, verb: 0.4, mxDelay: MH_16 } }
     ],
-    mx: [[1, 5, -15], [4, 3, -14]],   // clicks excite the drone on a 16th-note delay; blips feed the whirr
+    mx: [[1, 5, -17], [4, 3, -25]],   // clicks excite the drone on a 16th-note delay; blips feed the whirr
     // patterns by tape index: 0 kick, 1 clicks, 2 crackle, 3 whirr, 4 blips, 5 drone
     patterns: { v: 1, unit: 'bar', bpm: 124, bpb: 4, quant: 1, fade: 0, end: 'loop', chainOn: true,
       pads: [
@@ -4034,7 +4038,7 @@ function patSchedule(t, when, fade, solo) {
     if (fade > 0.001) { param.setValueAtTime(param.value, when); param.linearRampToValueAtTime(v, when + fade); }
     else param.setTargetAtTime(v, when, 0.004);
   };
-  ramp(n.fader.gain, faderGain(t.p.vol)); ramp(n.mute.gain, on ? 1 : 0);
+  ramp(n.fader.gain, faderGain(t.p.vol)); ramp(n.mute.gain, on ? 1 : 0); ramp(n.mxSend.gain, on ? 1 : 0);
   t._gateAhead = when + fade;   // until then applyParams leaves the shared on/off state alone
   linkGate(t, on, when, fade > 0.001 ? fade : 0.012);
 }
