@@ -369,6 +369,7 @@ table.maptable{border-collapse:collapse;width:100%;min-width:560px;font-size:14p
         <select class="sel" id="sceneSel"><option value="b:studio">Studio demo</option></select>
         <button class="btn primary" id="sceneLoad">Load scene</button>
         <button class="btn small" id="sceneDel" hidden>Delete</button>
+        <button class="btn small" id="sceneZip" title="Download every tape on the deck as its own WAV loop, in one .zip">Download loops (.zip)</button>
         <span class="grow"></span>
         <label class="lbl" for="sceneName">Save current set as</label>
         <input type="text" id="sceneName" maxlength="60" placeholder="Name this set" autocomplete="off">
@@ -3171,7 +3172,7 @@ async function loadScene(key, { announce = true } = {}) {
   } finally { sceneBusy = false; setSceneBusy(false); }
 }
 function setSceneBusy(on) {
-  for (const id of ['sceneLoad', 'sceneSave', 'sceneDel', 'sceneSel']) $('#' + id).disabled = on || (id === 'sceneSave' && !sceneStoreOK);
+  for (const id of ['sceneLoad', 'sceneSave', 'sceneDel', 'sceneSel', 'sceneZip']) $('#' + id).disabled = on || (id === 'sceneSave' && !sceneStoreOK);
   if (!on) updateSceneDesc();
   else $('#sceneDesc').textContent = 'Building the scene…';
 }
@@ -3239,6 +3240,46 @@ $('#sceneDel').addEventListener('click', async () => {
   try { await SceneStore.del(key.slice(2)); toast(`Deleted “${m ? m.name : 'scene'}”. The tapes on the deck stay as they are.`); if (S.scene === key) S.scene = null; }
   catch (e) { toast('Couldn’t delete that scene.'); }
   $('#sceneSel').value = 'b:studio'; await refreshSceneList();
+});
+
+/* ---- download the scene's loops: one WAV per tape, in a .zip ----
+   Each file is one full turn of the tape as it plays dry: trim, fades, tape length and placement,
+   reverse and varispeed applied; mixer (EQ, effects, sends, level, pan) left off. */
+async function renderTapeLoop(t) {
+  if (t._rb) { cancelAnimationFrame(t._rb); t._rb = 0; }
+  if (t._clipDirty) rebuild(t);
+  const buf = t.loopBuf;
+  if (Math.abs(t.speed - 1) < 1e-6) return buf;
+  const sr = buf.sampleRate, oc = new OfflineAudioContext(2, Math.max(1, Math.round(buf.length / t.speed)), sr);
+  const src = oc.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = t.speed;
+  src.connect(oc.destination); src.start(0);
+  return oc.startRendering();
+}
+function sceneLabel() {
+  const k = S.scene || '';
+  if (k.startsWith('b:') && SCENES[k.slice(2)]) return SCENES[k.slice(2)].name;
+  if (k.startsWith('u:')) { const m = savedScenes.find(x => x.id === k.slice(2)); if (m) return m.name; }
+  return $('#projName').value || 'tape-loops';
+}
+const fileSafe = s => String(s || '').trim().replace(/[^\w\- ]+/g, '').replace(/\s+/g, '-').slice(0, 60);
+$('#sceneZip').addEventListener('click', async () => {
+  const b = $('#sceneZip');
+  if (!S.tapes.length) { toast('There are no tapes on the deck to download.'); return; }
+  b.disabled = true; const label = b.textContent; b.textContent = 'Rendering…';
+  try {
+    const files = [], used = new Set(), pad = String(S.tapes.length).length < 2 ? 2 : String(S.tapes.length).length;
+    for (let i = 0; i < S.tapes.length; i++) {
+      const t = S.tapes[i], out = await renderTapeLoop(t);
+      let base = String(i + 1).padStart(pad, '0') + '-' + (fileSafe(t.name) || 'tape'), name = base + '.wav', n = 2;
+      while (used.has(name.toLowerCase())) name = `${base}-${n++}.wav`;
+      used.add(name.toLowerCase());
+      files.push({ name, data: new Uint8Array(encodeWAV(out)) });
+    }
+    const zipName = (fileSafe(sceneLabel()) || 'tape-loops') + '-loops.zip';
+    if (await offerFile(zipName, JamClips.zipBlob(files)) && !window.claude) toast(`Saved ${zipName}: ${files.length} loop${files.length === 1 ? '' : 's'}.`);
+  } catch (e) {
+    toast('Couldn’t make the loops .zip. ' + (e && e.message ? e.message : ''));
+  } finally { b.disabled = false; b.textContent = label; }
 });
 
 /* ================= matrix panel ================= */
