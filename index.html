@@ -118,6 +118,13 @@ select.sel{background:var(--well);border:1px solid var(--line);border-radius:4px
 .tapes{display:grid;gap:14px}
 .tape{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px 14px;display:grid;gap:12px}
 .tape-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.grip{display:inline-grid;place-items:center;background:none;border:1px solid transparent;border-radius:4px;color:var(--muted);cursor:grab;touch-action:none;padding:4px 3px;line-height:0}
+.grip:hover,.grip:focus-visible{color:var(--ink);border-color:var(--line);background:var(--well)}
+.grip svg{width:12px;height:18px;fill:currentColor}
+.strip .grip{align-self:center;padding:2px 6px;margin:-4px 0 -4px}
+.strip .grip svg{width:18px;height:12px}
+.tape.dragging,.strip.dragging{opacity:.55;outline:2px dashed var(--oxide-hi);outline-offset:2px}
+body.sorting,body.sorting *{cursor:grabbing!important;user-select:none!important}
 .tape-no{font-family:var(--display);font-weight:800;font-size:22px;color:var(--oxide-hi);letter-spacing:.04em}
 .tape-name{background:transparent;border:0;border-bottom:1px solid transparent;font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.03em;padding:0 2px;min-width:0;flex:1 1 160px;max-width:420px}
 .tape-name:hover,.tape-name:focus{border-bottom-color:var(--line);outline:none}
@@ -1728,6 +1735,80 @@ async function replaceAudio(t, f) {
 }
 
 /* ================= deck cards ================= */
+/* ---- reordering tapes: drag the grip on a deck card or a mixer strip (or focus it and use the arrow keys) ---- */
+function setTapeOrder(order) {
+  if (order.length !== S.tapes.length || order.every((t, i) => t === S.tapes[i])) return false;
+  S.tapes = order;
+  const box = $('#tapes'); S.tapes.forEach(t => { if (t.ui) box.append(t.ui.card); });
+  renumber(); refreshMixer(); refreshMap(); patRender(); linkChanged();
+  return true;
+}
+function moveTape(t, dir) {
+  const o = S.tapes.slice(), i = o.indexOf(t), j = i + dir;
+  if (i < 0 || j < 0 || j >= o.length) return;
+  o.splice(i, 1); o.splice(j, 0, t);
+  if (setTapeOrder(o)) toast(`Moved “${t.name}” to tape ${String(j + 1).padStart(2, '0')}.`);
+}
+function gripEl(t, where) {
+  const deck = where === 'deck';
+  const dots = deck ? [[3, 3], [9, 3], [3, 9], [9, 9], [3, 15], [9, 15]] : [[3, 3], [9, 3], [15, 3], [3, 9], [9, 9], [15, 9]];
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', deck ? '0 0 12 18' : '0 0 18 12'); svg.setAttribute('aria-hidden', 'true');
+  for (const [x, y] of dots) { const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 1.6); svg.append(c); }
+  const b = h('button', { class: 'grip', type: 'button', 'data-grip': where + t.id, title: 'Drag to reorder tapes',
+    'aria-label': `Move ${t.name}. Drag, or use the arrow keys` }, svg);
+  b.addEventListener('keydown', e => {
+    const back = deck ? 'ArrowUp' : 'ArrowLeft', fwd = deck ? 'ArrowDown' : 'ArrowRight';
+    if (e.key !== back && e.key !== fwd) return;
+    e.preventDefault(); moveTape(t, e.key === back ? -1 : 1);
+    requestAnimationFrame(() => { const g = document.querySelector(`[data-grip="${where}${t.id}"]`); if (g) g.focus(); });
+  });
+  b.addEventListener('pointerdown', e => startTapeDrag(e, t, where));
+  return b;
+}
+function startTapeDrag(e, t, where) {
+  if (e.button !== 0) return;
+  const deck = where === 'deck';
+  const box = deck ? $('#tapes') : $('#strips'), item = deck ? t.ui.card : e.currentTarget.closest('.strip');
+  if (!item || S.tapes.length < 2) return;
+  e.preventDefault();
+  const scroller = deck ? null : $('#console');
+  let px = e.clientX, py = e.clientY, raf = 0, moved = false;
+  const items = () => [...box.children].filter(el => el.dataset.tid && el !== item);
+  const place = () => {
+    const pos = deck ? py : px;
+    const next = items().find(el => { const r = el.getBoundingClientRect(); return pos < (deck ? r.top + r.height / 2 : r.left + r.width / 2); });
+    const ref = next || (deck ? null : box.querySelector('.strip.master'));
+    if (item.nextElementSibling !== ref || (!ref && box.lastElementChild !== item)) { box.insertBefore(item, ref); if (!deck) syncLampScroll(); }
+  };
+  const tick = () => {       // auto-scroll near the edges while dragging
+    raf = 0; let d = 0;
+    if (deck) { const m = 70; if (py < m + 40) d = -14; else if (py > innerHeight - m) d = 14; if (d) scrollBy(0, d); }
+    else if (scroller) { const r = scroller.getBoundingClientRect(), m = 60; if (px < r.left + m) d = -14; else if (px > r.right - m) d = 14; if (d) scroller.scrollLeft += d; }
+    place();
+    if (d) raf = requestAnimationFrame(tick);
+  };
+  const move = ev => {
+    if (ev.pointerId !== e.pointerId) return;
+    px = ev.clientX; py = ev.clientY;
+    if (!moved) { if (Math.hypot(px - e.clientX, py - e.clientY) < 4) return; moved = true; item.classList.add('dragging'); document.body.classList.add('sorting'); }
+    if (!raf) raf = requestAnimationFrame(tick);
+  };
+  const end = ev => {
+    if (ev.pointerId !== e.pointerId) return;
+    removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+    if (raf) cancelAnimationFrame(raf);
+    item.classList.remove('dragging'); document.body.classList.remove('sorting');
+    if (!moved) return;
+    const byId = new Map(S.tapes.map(x => [String(x.id), x]));
+    const order = [...box.children].map(el => byId.get(el.dataset.tid)).filter(Boolean);
+    if (setTapeOrder(order)) toast(`Moved “${t.name}” to tape ${String(S.tapes.indexOf(t) + 1).padStart(2, '0')}.`);
+    else if (!deck) refreshMixer();
+    requestAnimationFrame(() => { const g = document.querySelector(`[data-grip="${where}${t.id}"]`); if (g) g.focus({ preventScroll: true }); });
+  };
+  // listen on the window: moving the card in the page drops pointer capture on the grip
+  addEventListener('pointermove', move); addEventListener('pointerup', end); addEventListener('pointercancel', end);
+}
 function buildCard(t) {
   const ui = t.ui = {};
   const fileIn = h('input', { type: 'file', accept: 'audio/*', hidden: true, onchange: e => { if (e.target.files[0]) replaceAudio(t, e.target.files[0]); e.target.value = ''; } });
@@ -1738,8 +1819,9 @@ function buildCard(t) {
     setTimeout(() => { delete rmBtn.dataset.armed; rmBtn.textContent = 'Remove'; rmBtn.style.borderColor = ''; }, 2500);
   });
   ui.no = h('span', { class: 'tape-no' }, '00');
+  ui.grip = gripEl(t, 'deck');
   ui.name = h('input', { class: 'tape-name', value: t.name, 'aria-label': 'Tape name', maxlength: 40 });
-  ui.name.addEventListener('input', () => { t.name = ui.name.value || 'Tape'; if (ui.mixName) ui.mixName.textContent = t.name; });
+  ui.name.addEventListener('input', () => { t.name = ui.name.value || 'Tape'; if (ui.mixName) ui.mixName.textContent = t.name; ui.grip.setAttribute('aria-label', `Move ${t.name}. Drag, or use the arrow keys`); });
   ui.name.addEventListener('change', () => { refreshMap(); refreshMatrix(); });
   ui.meta = h('span', { class: 'tape-meta' });
   ui.linked = h('span', { class: 'linked', hidden: true, title: 'Another app is playing a copy of this tape, in time with the deck' });
@@ -1767,8 +1849,8 @@ function buildCard(t) {
     norm: v => v / 127, denorm: n => n * 127, dflt: 60, step: 1, disp: v => dispFor('note', v), parse: x => parseFor('note', x) }, 'row');
 
   buildTrim(t);
-  ui.card = h('article', { class: 'tape' },
-    h('div', { class: 'tape-head' }, ui.no, ui.name, ui.meta, ui.linked,
+  ui.card = h('article', { class: 'tape', 'data-tid': t.id },
+    h('div', { class: 'tape-head' }, ui.grip, ui.no, ui.name, ui.meta, ui.linked,
       h('div', { class: 'tape-acts' },
         ui.sdBtn = h('button', { class: 'btn small', hidden: !t.sd, title: 'Open this sound on the Sound design tab and reshape it', onclick: () => sdOpenTape(t) }, 'Edit sound'),
         ui.trimBtn, h('button', { class: 'btn small', onclick: () => fileIn.click() }, 'Replace sound'),
@@ -2378,7 +2460,7 @@ function refreshMixer() {
       fader: () => [h('div', { class: 'faderzone' }, faderEl(`t${t.id}:vol`), t.ui.meter), ctlPot(`t${t.id}:vol`, 'bare'),
         h('div', { class: 'ms' }, toggleEl(`t${t.id}:mute`, 'mute', 'M'), toggleEl(`t${t.id}:solo`, 'solo', 'S'))]
     };
-    box.append(h('div', { class: 'strip' },
+    box.append(h('div', { class: 'strip', 'data-tid': t.id }, gripEl(t, 'mix'),
       h('div', { class: 'strip-num' }, 'Tape ' + String(i + 1).padStart(2, '0')), t.ui.mixName,
       h('div', { class: 'chsel' }, h('span', {}, 'MIDI ch'), sel),
       ...ML.order.map(key => mixSect(t, key, body[key]()))

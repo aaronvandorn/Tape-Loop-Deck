@@ -2,7 +2,7 @@
 
 A virtual tape loop player that runs entirely in the browser (Web Audio API).
 
-- **Deck:** upload sounds and each becomes a tape loop. Loop the clip at its own length, or pad it with silence to a set tape length and drag the clip to where it should start. Varispeed, reverse, and spinning reels.
+- **Deck:** upload sounds and each becomes a tape loop. Loop the clip at its own length, or pad it with silence to a set tape length and drag the clip to where it should start. Varispeed, reverse, and spinning reels. Drag a tape's grip (the dots by its number) to reorder the tapes and keep similar loops together; the mixer strips have the same grip, and both stay in the same order. With the grip focused, the arrow keys move a tape one place.
 - **Scenes:** built-in sets (Studio demo, Nature, Microhouse, Empty deck), all synthesized in the browser. Save your current set as a named scene and recall it later; saved scenes, audio included, are kept in your browser. **Download loops (.zip)** saves every tape on the deck as its own WAV, in one .zip named after the scene: one full turn of each tape as it plays dry (trim, fades, tape length and placement, reverse and varispeed applied; the mixer's EQ, effects, sends, level and pan left off), numbered in deck order.
 - **Patterns:** store which tapes play, and their levels, on pads A–H, then switch between them on the next grid line or chain them to change after set counts of bars or seconds. See [Patterns and transitions](#patterns-and-transitions).
 - **Deck Link:** Axis Stack can pick any tape and play a copy of it in time with the deck, through its XY effects. See [Tapes in Axis Stack](#tapes-in-axis-stack).
